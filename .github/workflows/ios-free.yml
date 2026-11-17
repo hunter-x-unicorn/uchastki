@@ -1,0 +1,49 @@
+name: Build unsigned iPhone IPA (free)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/ios-free.yml'
+      - 'scripts/build-ios-unsigned.sh'
+      - 'app.json'
+      - 'app.config.ts'
+      - 'package-lock.json'
+
+permissions:
+  contents: read
+
+jobs:
+  ios:
+    # Standard hosted runners are free for public repositories.
+    # Use the included Codemagic config for a private repository on its free quota.
+    if: github.event.repository.private == false
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      CI: '1'
+      EXPO_PUBLIC_EAS_PROJECT_ID: ${{ vars.EAS_PROJECT_ID }}
+      EXPO_OWNER: ${{ vars.EXPO_OWNER }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck && npm test
+      - name: Generate native iOS project
+        run: npx expo prebuild --platform ios --no-install
+      - name: Install CocoaPods
+        run: cd ios && pod install
+      - name: Build and package IPA without Apple signing
+        run: bash scripts/build-ios-unsigned.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uchastki-ios-unsigned
+          path: artifacts/uchastki-unsigned.ipa
+          retention-days: 14
+
+# This IPA must be signed and installed using Sideloadly on the user's computer.
+# No paid Apple account or App Store submission is used by this workflow.

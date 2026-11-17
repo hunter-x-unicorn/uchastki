@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "Участки",
+    "slug": "uchastki",
+    "scheme": "uchastki",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "app.uchastki.offline",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "CFBundleDisplayName": "Участки"
+      }
+    },
+    "android": {
+      "package": "app.uchastki.offline",
+      "adaptiveIcon": {
+        "backgroundColor": "#284432",
+        "foregroundImage": "./assets/android-icon-foreground.png"
+      },
+      "allowBackup": false,
+      "predictiveBackGestureEnabled": true
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": ["expo-sharing", "expo-font", "expo-router", "./plugins/with-local-android-signing.cjs"],
+    "backgroundColor": "#F7F8F3"
+  }
+}
