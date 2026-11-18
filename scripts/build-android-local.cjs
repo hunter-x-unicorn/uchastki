@@ -5,6 +5,15 @@ const { spawnSync } = require('node:child_process');
 
 const root = path.resolve(__dirname, '..');
 process.chdir(root);
+const architectures = process.env.UCHASTKI_ANDROID_ARCHS || 'arm64-v8a';
+if (!/^(arm64-v8a|x86_64)(,(arm64-v8a|x86_64))*$/.test(architectures))
+  throw new Error('UCHASTKI_ANDROID_ARCHS must contain arm64-v8a and/or x86_64.');
+const apkName =
+  architectures === 'arm64-v8a'
+    ? 'uchastki-android-arm64.apk'
+    : architectures === 'x86_64'
+      ? 'uchastki-android-emulator.apk'
+      : 'uchastki-android-universal.apk';
 const javaHome = process.env.JAVA_HOME;
 const sdk =
   process.env.ANDROID_HOME ||
@@ -89,7 +98,7 @@ const prebuild = spawnSync(
 if (prebuild.error || prebuild.status !== 0) process.exit(prebuild.status || 1);
 const args = [
   'assembleRelease',
-  '-PreactNativeArchitectures=arm64-v8a',
+  `-PreactNativeArchitectures=${architectures}`,
   '--max-workers=2',
   '--console=plain',
 ];
@@ -105,6 +114,6 @@ if (result.error || result.status !== 0) process.exit(result.status || 1);
 fs.mkdirSync(path.join(root, 'artifacts'), { recursive: true });
 fs.copyFileSync(
   path.join(root, 'android/app/build/outputs/apk/release/app-release.apk'),
-  path.join(root, 'artifacts/uchastki-android-arm64.apk'),
+  path.join(root, 'artifacts', apkName),
 );
-console.log('APK ready: artifacts/uchastki-android-arm64.apk');
+console.log(`APK ready: artifacts/${apkName}`);

@@ -17,7 +17,7 @@ export async function exportBackup(data: AppData): Promise<void> {
     return;
   }
   const file = new File(Paths.cache, name);
-  file.write(content);
+  await file.write(content);
   if (!(await Sharing.isAvailableAsync()))
     throw new Error('На устройстве недоступно сохранение через меню «Поделиться».');
   await Sharing.shareAsync(file.uri, {

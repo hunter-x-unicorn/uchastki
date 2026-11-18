@@ -12,7 +12,7 @@ module.exports = function withLocalAndroidSigning(config) {
         'defaultConfig {',
         `defaultConfig {
         externalNativeBuild {
-            cmake { arguments "-DCMAKE_OBJECT_PATH_MAX=180" }
+            cmake { arguments "-DCMAKE_OBJECT_PATH_MAX=240" }
         }`,
       );
     }
