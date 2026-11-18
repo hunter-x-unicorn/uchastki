@@ -45,7 +45,7 @@
     "export:web": "expo export --platform web",
     "preview": "node scripts/serve-preview.cjs",
     "build:android:local": "node scripts/build-android-local.cjs",
-    "update:publish": "npx eas-cli@27.10.0 update --channel production",
+    "update:publish": "npx eas-cli@27.10.0 update --channel production --environment production",
     "lint": "eslint ."
   },
   "private": true,
