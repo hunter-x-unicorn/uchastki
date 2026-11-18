@@ -30,12 +30,12 @@ module.exports = function withLocalAndroidSigning(config) {
         }`,
       );
     }
-    const release = /(release\s*\{[\s\S]*?signingConfig\s+)signingConfigs\.(?:debug|uchastki)/;
+    const release = /(\brelease\s*\{[^}]*?\bsigningConfig\s+)signingConfigs\.(?:debug|uchastki)/;
     if (!release.test(gradle)) throw new Error('Expected Android release signing block.');
     gradle = gradle.replace(release, '$1signingConfigs.uchastki');
     // Development builds retain the standard debug identity.
     gradle = gradle.replace(
-      /(buildTypes\s*\{\s*debug\s*\{[\s\S]*?signingConfig\s+)signingConfigs\.uchastki/,
+      /(buildTypes\s*\{\s*debug\s*\{[^}]*?signingConfig\s+)signingConfigs\.uchastki/,
       '$1signingConfigs.debug',
     );
     result.modResults.contents = gradle;

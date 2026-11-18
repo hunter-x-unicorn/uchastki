@@ -96,6 +96,9 @@ const prebuild = spawnSync(
   { cwd: root, env, stdio: 'inherit' },
 );
 if (prebuild.error || prebuild.status !== 0) process.exit(prebuild.status || 1);
+const generatedGradle = fs.readFileSync(path.join(root, 'android/app/build.gradle'), 'utf8');
+if (!/\brelease\s*\{[^}]*?\bsigningConfig\s+signingConfigs\.uchastki/.test(generatedGradle))
+  throw new Error('Release signing was not applied; refusing to distribute a debug-signed APK.');
 const args = [
   'assembleRelease',
   `-PreactNativeArchitectures=${architectures}`,
