@@ -14,12 +14,17 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ios-free-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   ios:
     # Standard hosted runners are free for public repositories.
     # Use the included Codemagic config for a private repository on its free quota.
     if: github.event.repository.private == false
-    runs-on: macos-latest
+    # Intel runners avoid the current capacity queue on hosted Apple Silicon Macs.
+    runs-on: macos-15-intel
     timeout-minutes: 60
     env:
       CI: '1'
