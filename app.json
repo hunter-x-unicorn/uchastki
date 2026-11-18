@@ -2,6 +2,8 @@
   "expo": {
     "name": "Участки",
     "slug": "uchastki",
+    "owner": "andrey8636s-team",
+    "extra": { "eas": { "projectId": "ff77991a-0072-4b8f-a524-01ce7bddf204" } },
     "scheme": "uchastki",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -27,7 +29,12 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "plugins": ["expo-sharing", "expo-font", "expo-router", "./plugins/with-local-android-signing.cjs"],
+    "plugins": [
+      "expo-sharing",
+      "expo-font",
+      "expo-router",
+      "./plugins/with-local-android-signing.cjs"
+    ],
     "backgroundColor": "#F7F8F3"
   }
 }

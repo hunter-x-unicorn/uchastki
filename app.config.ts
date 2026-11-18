@@ -1,7 +1,10 @@
 import { ConfigContext, ExpoConfig } from 'expo/config';
 
 export default ({ config }: ConfigContext): ExpoConfig => {
-  const projectId = process.env.EXPO_PUBLIC_EAS_PROJECT_ID || process.env.EAS_PROJECT_ID;
+  const projectId =
+    process.env.EXPO_PUBLIC_EAS_PROJECT_ID ||
+    process.env.EAS_PROJECT_ID ||
+    config.extra?.eas?.projectId;
   if (
     projectId &&
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(projectId)
@@ -12,7 +15,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ...config,
     name: config.name ?? 'Участки',
     slug: config.slug ?? 'uchastki',
-    owner: process.env.EXPO_OWNER || undefined,
+    owner: process.env.EXPO_OWNER || config.owner,
     // Bump app.json version whenever native dependencies or permissions change.
     runtimeVersion: { policy: 'appVersion' },
     updates: projectId

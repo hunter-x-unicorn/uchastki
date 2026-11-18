@@ -4,6 +4,18 @@ module.exports = function withLocalAndroidSigning(config) {
   if (process.env.UCHASTKI_LOCAL_SIGNING !== '1') return config;
   return withAppBuildGradle(config, (result) => {
     let gradle = result.modResults.contents;
+    // CMake hashes long object paths before Ninja reaches Windows' path limit.
+    if (!gradle.includes('CMAKE_OBJECT_PATH_MAX')) {
+      if (!gradle.includes('defaultConfig {'))
+        throw new Error('Expected Android defaultConfig block.');
+      gradle = gradle.replace(
+        'defaultConfig {',
+        `defaultConfig {
+        externalNativeBuild {
+            cmake { arguments "-DCMAKE_OBJECT_PATH_MAX=180" }
+        }`,
+      );
+    }
     if (!gradle.includes('UCHASTKI_KEYSTORE_PATH')) {
       if (!gradle.includes('signingConfigs {'))
         throw new Error('Expected Android signingConfigs block.');

@@ -31,5 +31,4 @@ jobs:
       - name: Check free Expo project configuration
         run: |
           test -n "$EXPO_TOKEN" || { echo 'Set EXPO_TOKEN in repository secrets first.'; exit 1; }
-          test -n "$EXPO_PUBLIC_EAS_PROJECT_ID" || { echo 'Set EAS_PROJECT_ID in repository variables first.'; exit 1; }
       - run: npx --yes eas-cli@27.10.0 update --channel production --message "$UPDATE_MESSAGE" --non-interactive
