@@ -28,6 +28,7 @@ jobs:
     timeout-minutes: 60
     env:
       CI: '1'
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
       EXPO_PUBLIC_EAS_PROJECT_ID: ${{ vars.EAS_PROJECT_ID }}
       EXPO_OWNER: ${{ vars.EXPO_OWNER }}
     steps:
