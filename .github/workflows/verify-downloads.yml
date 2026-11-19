@@ -1,0 +1,70 @@
+name: Verify Android and iPhone downloads
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ['Build unsigned iPhone IPA (free)']
+    types: [completed]
+    branches: [main]
+  push:
+    branches: [main]
+    paths: ['.github/workflows/verify-downloads.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check whether both files are published
+        id: ready
+        run: |
+          ready=$(gh release view v1.0.1 --repo "$GITHUB_REPOSITORY" --json assets --jq 'any(.assets[]; .name == "uchastki-1.0.1-unsigned.ipa")')
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+      - name: Download and verify release files
+        if: steps.ready.outputs.ready == 'true'
+        run: |
+          mkdir -p artifacts
+          gh release download v1.0.1 --repo "$GITHUB_REPOSITORY" --pattern 'uchastki-1.0.1.apk' --pattern 'uchastki-1.0.1-unsigned.ipa' --dir artifacts
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, plistlib, struct, subprocess, zipfile
+          release = json.loads(subprocess.check_output(['gh', 'api', f"repos/{os.environ['GITHUB_REPOSITORY']}/releases/tags/v1.0.1"]))
+          assets = {asset['name']: asset for asset in release['assets']}
+          report = {'version': '1.0.1', 'files': {}, 'physicalIPhoneTested': False}
+          for name in ('uchastki-1.0.1.apk', 'uchastki-1.0.1-unsigned.ipa'):
+              file = pathlib.Path('artifacts') / name
+              digest = hashlib.sha256(file.read_bytes()).hexdigest()
+              assert assets[name]['digest'] == 'sha256:' + digest, 'Release checksum mismatch'
+              report['files'][name] = {'bytes': file.stat().st_size, 'sha256': digest}
+              with zipfile.ZipFile(file) as archive:
+                  assert archive.testzip() is None, 'Invalid ZIP entry'
+          android = json.loads(pathlib.Path('.github/releases/android-1.0.1.json').read_text())
+          assert report['files']['uchastki-1.0.1.apk']['sha256'] == android['sha256']
+          with zipfile.ZipFile('artifacts/uchastki-1.0.1-unsigned.ipa') as archive:
+              app = 'Payload/Uchastki.app/'
+              info = plistlib.loads(archive.read(app + 'Info.plist'))
+              updates = plistlib.loads(archive.read(app + 'Expo.plist'))
+              assert info['CFBundleIdentifier'] == 'app.uchastki.offline'
+              assert info['CFBundleShortVersionString'] == '1.0.1'
+              assert info['CFBundleVersion'] == '2'
+              assert info['CFBundleSupportedPlatforms'] == ['iPhoneOS']
+              magic, cpu = struct.unpack_from('<II', archive.read(app + info['CFBundleExecutable']))
+              assert magic == 0xfeedfacf and cpu == 0x0100000c, 'Expected an ARM64 iPhone executable'
+              assert len(archive.read(app + 'main.jsbundle')) > 100000
+              assert updates['EXUpdatesEnabled'] is True
+              assert updates['EXUpdatesRuntimeVersion'] == '1.0.0'
+              assert updates['EXUpdatesRequestHeaders']['expo-channel-name'] == 'production'
+              assert updates['EXUpdatesURL'] == 'https://u.expo.dev/ff77991a-0072-4b8f-a524-01ce7bddf204'
+              report['iPhone'] = {'minimumIOS': info['MinimumOSVersion'], 'architecture': 'arm64', 'bundleIdentifier': info['CFBundleIdentifier'], 'runtime': updates['EXUpdatesRuntimeVersion'], 'channel': 'production'}
+          pathlib.Path('artifacts/VERIFICATION-1.0.1.json').write_text(json.dumps(report, indent=2) + '\n')
+          print(json.dumps(report, indent=2))
+          PY
+      - name: Publish verification report
+        if: steps.ready.outputs.ready == 'true'
+        run: gh release upload v1.0.1 --repo "$GITHUB_REPOSITORY" artifacts/VERIFICATION-1.0.1.json --clobber
