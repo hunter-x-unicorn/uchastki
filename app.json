@@ -5,13 +5,14 @@
     "owner": "andrey8636s-team",
     "extra": { "eas": { "projectId": "ff77991a-0072-4b8f-a524-01ce7bddf204" } },
     "scheme": "uchastki",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "app.uchastki.offline",
+      "buildNumber": "2",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "CFBundleDisplayName": "Участки"
@@ -19,8 +20,9 @@
     },
     "android": {
       "package": "app.uchastki.offline",
+      "versionCode": 2,
       "adaptiveIcon": {
-        "backgroundColor": "#284432",
+        "backgroundColor": "#4A6DA7",
         "foregroundImage": "./assets/android-icon-foreground.png"
       },
       "allowBackup": false,
@@ -35,6 +37,6 @@
       "expo-router",
       "./plugins/with-local-android-signing.cjs"
     ],
-    "backgroundColor": "#F7F8F3"
+    "backgroundColor": "#F5F7FB"
   }
 }

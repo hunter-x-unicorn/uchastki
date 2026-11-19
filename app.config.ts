@@ -16,8 +16,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     name: config.name ?? 'Участки',
     slug: config.slug ?? 'uchastki',
     owner: process.env.EXPO_OWNER || config.owner,
-    // Bump app.json version whenever native dependencies or permissions change.
-    runtimeVersion: { policy: 'appVersion' },
+    // 1.0.1 changes icons and JS only; keep updates compatible with installed 1.0.0.
+    // Change this runtime when native APIs, dependencies or permissions change.
+    runtimeVersion: '1.0.0',
     updates: projectId
       ? {
           enabled: true,

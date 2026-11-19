@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef } from 'react';
 import {
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -13,18 +14,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Apartment, stats } from './model';
+import { C } from './theme';
+export { C } from './theme';
 
-export const C = {
-  bg: '#F7F8F3',
-  ink: '#252D26',
-  muted: '#767D72',
-  green: '#416348',
-  dark: '#284432',
-  line: '#E5E9DF',
-  pale: '#EDF1E7',
-  amber: '#A9742D',
-  red: '#A44339',
-};
+type FormInput = React.ComponentRef<typeof TextInput>;
+const FocusedSheetInput = createContext<(input: FormInput | null) => void>(() => {});
 export type IconName = React.ComponentProps<typeof Ionicons>['name'];
 export function Icon({
   name,
@@ -64,7 +58,7 @@ export function Button({
   disabled?: boolean;
   small?: boolean;
 }) {
-  const color = danger ? C.red : secondary ? C.green : '#FFFFFF';
+  const color = danger ? C.red : secondary ? C.accent : '#FFFFFF';
   return (
     <Pressable
       accessibilityRole="button"
@@ -113,7 +107,7 @@ export function Progress({ apartments }: { apartments: Apartment[] }) {
       accessibilityLabel={`Пройдено ${v.visited} из ${v.total}, никого не застали в ${v.absent}`}
     >
       {!!v.visited && (
-        <View style={{ width: `${(v.visited / v.total) * 100}%`, backgroundColor: C.green }} />
+        <View style={{ width: `${(v.visited / v.total) * 100}%`, backgroundColor: C.accent }} />
       )}
       {!!v.absent && (
         <View style={{ width: `${(v.absent / v.total) * 100}%`, backgroundColor: '#DBB270' }} />
@@ -136,21 +130,26 @@ export function Field({
   numeric?: boolean;
   multiline?: boolean;
 }) {
+  const inputRef = useRef<FormInput>(null);
+  const trackFocus = useContext(FocusedSheetInput);
   return (
     <View style={s.field}>
       <Text style={s.fieldLabel}>{label}</Text>
       <TextInput
+        ref={inputRef}
         accessibilityLabel={label}
         style={[s.input, multiline && s.textarea]}
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
-        placeholderTextColor="#9BA294"
+        placeholderTextColor={C.placeholder}
         keyboardType={numeric ? 'numbers-and-punctuation' : 'default'}
         multiline={multiline}
         maxLength={multiline ? 10000 : numeric ? 8 : label.includes('Адрес') ? 300 : 120}
         autoCapitalize={numeric ? 'none' : 'sentences'}
         textAlignVertical={multiline ? 'top' : 'center'}
+        onFocus={() => trackFocus(inputRef.current)}
+        onBlur={() => trackFocus(null)}
       />
     </View>
   );
@@ -166,11 +165,40 @@ export function Sheet({
   children: React.ReactNode;
   onClose: () => void;
 }) {
+  const scrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
+  const focusedInput = useRef<FormInput | null>(null);
+  const pendingFrame = useRef<number | null>(null);
+  const revealInput = useCallback(() => {
+    if (Platform.OS === 'web') return;
+    if (pendingFrame.current !== null) cancelAnimationFrame(pendingFrame.current);
+    pendingFrame.current = requestAnimationFrame(() => {
+      pendingFrame.current = null;
+      const input = focusedInput.current;
+      if (Keyboard.isVisible() && input?.isFocused()) {
+        scrollRef.current?.scrollResponderScrollNativeHandleToKeyboard(input, 16, true);
+      }
+    });
+  }, []);
+  const trackFocus = useCallback(
+    (input: FormInput | null) => {
+      focusedInput.current = input;
+      revealInput();
+    },
+    [revealInput],
+  );
+  useEffect(() => {
+    const subscription = Keyboard.addListener('keyboardDidShow', revealInput);
+    return () => {
+      subscription.remove();
+      if (pendingFrame.current !== null) cancelAnimationFrame(pendingFrame.current);
+    };
+  }, [revealInput]);
+
   return (
     <Modal visible animationType="slide" transparent onRequestClose={onClose} statusBarTranslucent>
       <KeyboardAvoidingView
         style={s.modalBackdrop}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'web' ? undefined : 'padding'}
       >
         <Pressable
           accessibilityLabel="Закрыть окно"
@@ -187,8 +215,14 @@ export function Sheet({
             </View>
             <IconButton name="close" label="Закрыть" onPress={onClose} />
           </View>
-          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={s.sheetBody}>
-            {children}
+          <ScrollView
+            ref={scrollRef}
+            style={s.sheetScroll}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={s.sheetBody}
+            onLayout={revealInput}
+          >
+            <FocusedSheetInput.Provider value={trackFocus}>{children}</FocusedSheetInput.Provider>
           </ScrollView>
         </SafeAreaView>
       </KeyboardAvoidingView>
@@ -209,7 +243,7 @@ export function Empty({
   return (
     <View style={s.empty}>
       <View style={s.emptyIcon}>
-        <Icon name={icon} size={40} color={C.green} />
+        <Icon name={icon} size={40} color={C.accent} />
       </View>
       <Text style={s.emptyTitle}>{title}</Text>
       <Text style={s.emptyText}>{text}</Text>
@@ -243,7 +277,7 @@ export const s = StyleSheet.create({
   logo: {
     width: 42,
     height: 42,
-    backgroundColor: C.dark,
+    backgroundColor: C.hero,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 13,
@@ -252,24 +286,9 @@ export const s = StyleSheet.create({
   brand: { color: C.ink, fontSize: 18, fontWeight: '700', letterSpacing: -0.4 },
   brandSub: { color: C.muted, fontSize: 11, marginTop: 2 },
   saveBadge: { flexDirection: 'row', gap: 5, alignItems: 'center', padding: 8 },
-  saveText: { fontSize: 11, color: C.green },
+  saveText: { fontSize: 11, color: C.accent },
   content: { width: '100%', maxWidth: 1040, alignSelf: 'center', paddingHorizontal: 20 },
-  pageHeading: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-    marginTop: 31,
-    marginBottom: 25,
-  },
-  eyebrow: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: C.green,
-    letterSpacing: 1.8,
-    marginBottom: 10,
-  },
   title: { fontSize: 32, lineHeight: 39, fontWeight: '700', color: C.ink, letterSpacing: -1.2 },
-  subtitle: { fontSize: 13, lineHeight: 20, color: C.muted, marginTop: 9 },
   back: {
     flexDirection: 'row',
     gap: 7,
@@ -277,54 +296,37 @@ export const s = StyleSheet.create({
     alignSelf: 'flex-start',
     paddingVertical: 14,
     marginTop: 6,
-    marginBottom: -17,
+    marginBottom: 10,
   },
-  backText: { fontSize: 13, color: C.green, maxWidth: 290 },
-  summary: { backgroundColor: C.dark, borderRadius: 22, padding: 22, marginBottom: 31 },
-  summaryEyebrow: {
-    color: '#B8C9AF',
-    fontSize: 9,
-    letterSpacing: 1.7,
-    fontWeight: '700',
-    marginBottom: 8,
-  },
-  summaryTitle: { color: '#FAFCF6', fontSize: 17, fontWeight: '600', letterSpacing: -0.3 },
-  summaryIcon: {
-    width: 46,
-    height: 46,
-    borderWidth: 1,
-    borderColor: '#526B51',
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  counters: { flexDirection: 'row' },
-  counter: { flex: 1, gap: 7 },
-  counterValue: { fontSize: 29, color: '#F3F7ED', fontWeight: '600', letterSpacing: -1 },
-  counterLabel: { color: '#BDCCB6', fontSize: 10 },
-  dot: { width: 6, height: 6, borderRadius: 4 },
+  backText: { fontSize: 13, color: C.accent, maxWidth: 290 },
   sectionHeading: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 18,
   },
-  sectionTitle: { fontSize: 20, fontWeight: '600', color: C.ink, letterSpacing: -0.5 },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: C.ink,
+    letterSpacing: -0.5,
+    flexShrink: 1,
+  },
   countBadge: {
     minWidth: 25,
     height: 24,
     borderRadius: 8,
-    backgroundColor: '#E8EDDF',
+    backgroundColor: C.pale,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 7,
   },
-  countBadgeText: { fontSize: 11, fontWeight: '600', color: C.green },
+  countBadgeText: { fontSize: 11, fontWeight: '600', color: C.accent },
   button: {
     minHeight: 49,
     paddingHorizontal: 18,
     paddingVertical: 13,
-    backgroundColor: C.green,
+    backgroundColor: C.accent,
     borderRadius: 13,
     flexDirection: 'row',
     alignItems: 'center',
@@ -332,7 +334,7 @@ export const s = StyleSheet.create({
     gap: 8,
   },
   buttonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
-  secondary: { backgroundColor: C.pale, borderWidth: 1, borderColor: '#DCE4D3' },
+  secondary: { backgroundColor: C.pale, borderWidth: 1, borderColor: C.softLine },
   buttonSmall: { minHeight: 42, paddingHorizontal: 13, paddingVertical: 9, borderRadius: 11 },
   iconButton: {
     minWidth: 42,
@@ -353,7 +355,7 @@ export const s = StyleSheet.create({
   cardIcon: {
     width: 49,
     height: 49,
-    backgroundColor: '#EFF3E9',
+    backgroundColor: C.soft,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 15,
@@ -361,18 +363,18 @@ export const s = StyleSheet.create({
   cardTitle: { fontSize: 17, fontWeight: '600', color: C.ink, letterSpacing: -0.2 },
   cardSubtitle: { fontSize: 12, color: C.muted, marginTop: 6, lineHeight: 17 },
   cardFooter: { marginTop: 13, flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
-  cardLink: { fontSize: 11, color: C.green, fontWeight: '600' },
+  cardLink: { fontSize: 11, color: C.accent, fontWeight: '600' },
   meta: {
     fontSize: 11,
-    color: '#616B5A',
-    backgroundColor: '#F6F8F2',
+    color: C.mutedStrong,
+    backgroundColor: C.soft,
     paddingVertical: 5,
     paddingHorizontal: 8,
     borderRadius: 6,
   },
   progress: {
     height: 5,
-    backgroundColor: '#EDF0E8',
+    backgroundColor: C.pale,
     borderRadius: 8,
     flexDirection: 'row',
     overflow: 'hidden',
@@ -384,12 +386,12 @@ export const s = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderStyle: 'dashed',
-    borderColor: '#D6DFCB',
+    borderColor: C.softLine,
     borderRadius: 22,
     marginBottom: 10,
   },
   emptyIcon: {
-    backgroundColor: '#F0F4E8',
+    backgroundColor: C.pale,
     borderRadius: 25,
     width: 84,
     height: 84,
@@ -420,97 +422,9 @@ export const s = StyleSheet.create({
     paddingVertical: 7,
   },
   demoText: { fontSize: 12, color: C.muted },
-  search: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: C.line,
-    borderRadius: 13,
-    paddingHorizontal: 14,
-    height: 49,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  searchInput: { flex: 1, fontSize: 13, color: C.ink, height: '100%' },
-  filters: { gap: 7, paddingVertical: 15 },
-  filter: {
-    paddingHorizontal: 12,
-    minHeight: 38,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: C.line,
-    backgroundColor: '#FFFFFF',
-  },
-  filterActive: { backgroundColor: C.dark, borderColor: C.dark },
-  filterText: { fontSize: 11, color: '#68715F' },
-  filterTextActive: { color: '#FFFFFF', fontWeight: '500' },
-  floorSection: { marginBottom: 26 },
-  floorHeading: { flexDirection: 'row', gap: 12, alignItems: 'center', marginBottom: 13 },
-  floorTitle: { fontSize: 13, color: '#5D6854', fontWeight: '600' },
-  floorLine: { height: 1, backgroundColor: '#E0E5D8', flex: 1 },
-  apartmentGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  apartmentCard: {
-    borderWidth: 1,
-    borderColor: C.line,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 15,
-    overflow: 'hidden',
-  },
-  apartmentMain: { flex: 1, padding: 14, minHeight: 122 },
-  apartmentLabel: { fontSize: 8, fontWeight: '600', letterSpacing: 1.4, color: '#8A9281' },
-  apartmentNumber: {
-    fontSize: 27,
-    fontWeight: '600',
-    color: C.ink,
-    marginTop: 4,
-    letterSpacing: -0.7,
-    maxWidth: 140,
-  },
-  statusBadge: {
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingVertical: 5,
-    paddingHorizontal: 7,
-    borderRadius: 6,
-    marginTop: 11,
-    maxWidth: '100%',
-  },
-  statusLabel: { fontSize: 9, fontWeight: '500', flexShrink: 1 },
-  noteDot: {
-    width: 25,
-    height: 25,
-    backgroundColor: '#EFF4E8',
-    borderRadius: 7,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  apartmentNote: { fontSize: 10, color: C.muted, lineHeight: 15, marginTop: 9 },
-  quickActions: {
-    borderTopWidth: 1,
-    borderTopColor: '#F0F2EC',
-    padding: 5,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  quickButton: {
-    flex: 1,
-    minHeight: 39,
-    paddingHorizontal: 3,
-    borderRadius: 8,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 3,
-  },
-  quickLabel: { fontSize: 9, color: C.green },
-  quickDivider: { width: 1, height: 17, backgroundColor: C.line, marginHorizontal: 4 },
   muted: { color: C.muted, fontSize: 14 },
   smallMuted: { fontSize: 11, color: C.muted, lineHeight: 17, flexShrink: 1 },
-  body: { fontSize: 14, color: '#5F6A58', lineHeight: 22 },
+  body: { fontSize: 14, color: C.mutedStrong, lineHeight: 22 },
   localInfo: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -519,23 +433,25 @@ export const s = StyleSheet.create({
     marginTop: 29,
     marginBottom: 13,
   },
-  localInfoText: { fontSize: 10, color: '#8B9383', lineHeight: 16 },
+  localInfoText: { fontSize: 10, color: C.placeholder, lineHeight: 16 },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: '#18281F80',
-    justifyContent: 'flex-end',
+    backgroundColor: C.overlay,
+    justifyContent: 'center',
     alignItems: 'center',
+    padding: 20,
   },
   sheet: {
+    flexShrink: 1,
     width: '100%',
-    maxWidth: 600,
+    maxWidth: 430,
     maxHeight: '92%',
     backgroundColor: C.bg,
-    borderTopLeftRadius: 25,
-    borderTopRightRadius: 25,
+    borderRadius: 21,
     overflow: 'hidden',
   },
   sheetHeader: {
+    flexShrink: 0,
     flexDirection: 'row',
     gap: 10,
     paddingHorizontal: 24,
@@ -547,13 +463,14 @@ export const s = StyleSheet.create({
   },
   sheetTitle: { fontSize: 22, fontWeight: '600', color: C.ink, letterSpacing: -0.6 },
   sheetSubtitle: { fontSize: 12, color: C.muted, lineHeight: 18, marginTop: 7 },
+  sheetScroll: { flexShrink: 1 },
   sheetBody: { padding: 24, paddingBottom: 35 },
   field: { marginBottom: 20 },
-  fieldLabel: { fontSize: 12, fontWeight: '600', color: '#55604D', marginBottom: 9 },
+  fieldLabel: { fontSize: 12, fontWeight: '600', color: C.mutedStrong, marginBottom: 9 },
   input: {
     minHeight: 49,
     borderWidth: 1,
-    borderColor: '#DDE4D4',
+    borderColor: C.line,
     borderRadius: 11,
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -567,12 +484,12 @@ export const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 12,
-    backgroundColor: '#EAF0E1',
+    backgroundColor: C.pale,
     padding: 16,
     borderRadius: 13,
     marginBottom: 23,
   },
-  infoText: { fontSize: 12, lineHeight: 19, color: '#526448', flex: 1 },
+  infoText: { fontSize: 12, lineHeight: 19, color: C.accentStrong, flex: 1 },
   statusOptions: { gap: 9, marginBottom: 24 },
   statusOption: {
     borderWidth: 1,
@@ -602,7 +519,7 @@ export const s = StyleSheet.create({
     position: 'absolute',
     bottom: 25,
     alignSelf: 'center',
-    backgroundColor: C.dark,
+    backgroundColor: C.hero,
     borderRadius: 13,
     paddingHorizontal: 19,
     paddingVertical: 14,
@@ -614,7 +531,7 @@ export const s = StyleSheet.create({
   toastText: { color: '#FFFFFF', fontSize: 12 },
   dialogBackdrop: {
     flex: 1,
-    backgroundColor: '#18281F80',
+    backgroundColor: C.overlay,
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
@@ -625,8 +542,8 @@ export const s = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#E4EFD9',
+    backgroundColor: C.pale,
     padding: 13,
   },
-  updateText: { fontSize: 12, color: C.green, flexShrink: 1 },
+  updateText: { fontSize: 12, color: C.accent, flexShrink: 1 },
 });

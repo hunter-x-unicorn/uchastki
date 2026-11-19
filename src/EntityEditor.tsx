@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import {
   Apartment,
-  ApartmentStatus,
+  EMPTY_DETAILS,
+  EMPTY_MARKERS,
   Entrance,
-  STATUS,
   Territory,
   createEntrance,
   id,
@@ -22,14 +22,12 @@ export function EntityEditor({
   entrance,
   onClose,
   onSave,
-  onDelete,
 }: {
   editor: Editor;
   territory?: Territory;
   entrance?: Entrance;
   onClose: () => void;
   onSave: (value: Territory | Entrance | Apartment) => void;
-  onDelete: () => void;
 }) {
   const existing = editor.existing;
   const apartment = editor.kind === 'apartment' ? editor.existing : undefined;
@@ -39,9 +37,7 @@ export function EntityEditor({
       : (editor.existing?.name ??
           (editor.kind === 'entrance' ? `Подъезд ${(territory?.entrances.length ?? 0) + 1}` : '')),
   );
-  const [address, setAddress] = useState(
-    editor.kind === 'territory' ? (editor.existing?.address ?? '') : '',
-  );
+  const address = editor.kind === 'territory' ? (editor.existing?.address ?? '') : '';
   const [floors, setFloors] = useState('5');
   const [firstFloor, setFirstFloor] = useState('1');
   const [perFloor, setPerFloor] = useState('4');
@@ -54,8 +50,9 @@ export function EntityEditor({
     apartment?.number ?? (editor.kind === 'entrance' ? '1' : String(nextNumber)),
   );
   const [floor, setFloor] = useState(String(apartment?.floor ?? 1));
-  const [status, setStatus] = useState<ApartmentStatus>(apartment?.status ?? 'unvisited');
+  const status = apartment?.status ?? 'unvisited';
   const [note, setNote] = useState(apartment?.note ?? '');
+  const [details, setDetails] = useState(apartment?.details ?? { ...EMPTY_DETAILS });
   const [error, setError] = useState('');
   function save() {
     try {
@@ -105,13 +102,25 @@ export function EntityEditor({
           number: number.trim(),
           floor: Number(floor),
           status,
+          absentCount: apartment?.absentCount ?? 0,
+          repeatCount: apartment?.repeatCount ?? 0,
+          markers: {
+            ...(apartment?.markers ?? EMPTY_MARKERS),
+            pencil: !!(note.trim() || Object.values(details).some((value) => value.trim())),
+          },
+          details: {
+            name: details.name.trim(),
+            phone: details.phone.trim(),
+            preferredTime: details.preferredTime.trim(),
+          },
           note: note.trim(),
           updatedAt:
             apartment &&
             apartment.number === number.trim() &&
             apartment.floor === Number(floor) &&
             apartment.status === status &&
-            apartment.note === note.trim()
+            apartment.note === note.trim() &&
+            JSON.stringify(apartment.details) === JSON.stringify(details)
               ? apartment.updatedAt
               : new Date().toISOString(),
         });
@@ -146,12 +155,6 @@ export function EntityEditor({
             onChangeText={setName}
             placeholder="Например, Центральный"
           />
-          <Field
-            label="Адрес или описание"
-            value={address}
-            onChangeText={setAddress}
-            placeholder="Улица и дом или границы участка"
-          />
         </>
       )}
       {editor.kind === 'entrance' && (
@@ -165,7 +168,7 @@ export function EntityEditor({
           {!existing && (
             <>
               <View style={s.infoBox}>
-                <Icon name="sparkles-outline" color={C.green} />
+                <Icon name="sparkles-outline" color={C.accent} />
                 <Text style={s.infoText}>
                   Квартиры создадутся автоматически. Позже можно изменить номер и этаж каждой
                   квартиры.
@@ -229,42 +232,23 @@ export function EntityEditor({
               <Field label="Этаж" value={floor} onChangeText={setFloor} numeric />
             </View>
           </View>
-          <Text style={[s.fieldLabel, { marginBottom: 12 }]}>Результат обхода</Text>
-          <View style={s.statusOptions}>
-            {(['unvisited', 'visited', 'absent'] as const).map((value) => (
-              <Pressable
-                key={value}
-                accessibilityRole="radio"
-                accessibilityState={{ checked: status === value }}
-                onPress={() => setStatus(value)}
-                style={[
-                  s.statusOption,
-                  status === value && {
-                    borderColor: STATUS[value].color,
-                    backgroundColor: STATUS[value].background,
-                  },
-                ]}
-              >
-                <Icon
-                  name={
-                    value === 'visited'
-                      ? 'checkmark-circle-outline'
-                      : value === 'absent'
-                        ? 'time-outline'
-                        : 'ellipse-outline'
-                  }
-                  size={21}
-                  color={STATUS[value].color}
-                />
-                <Text style={[s.body, s.flex, status === value && { fontWeight: '600' }]}>
-                  {STATUS[value].label}
-                </Text>
-                {status === value && (
-                  <Icon name="checkmark" color={STATUS[value].color} size={19} />
-                )}
-              </Pressable>
-            ))}
-          </View>
+          <Field
+            label="Имя или обращение"
+            value={details.name}
+            onChangeText={(value) => setDetails((previous) => ({ ...previous, name: value }))}
+          />
+          <Field
+            label="Телефон"
+            value={details.phone}
+            onChangeText={(value) => setDetails((previous) => ({ ...previous, phone: value }))}
+          />
+          <Field
+            label="Когда зайти повторно"
+            value={details.preferredTime}
+            onChangeText={(value) =>
+              setDetails((previous) => ({ ...previous, preferredTime: value }))
+            }
+          />
           <Field
             label="Дополнительные сведения"
             value={note}
@@ -304,18 +288,6 @@ export function EntityEditor({
         icon="checkmark"
         onPress={save}
       />
-      {existing && (
-        <Pressable accessibilityRole="button" onPress={onDelete} style={s.deleteButton}>
-          <Icon name="trash-outline" size={17} color={C.red} />
-          <Text style={s.deleteText}>
-            {editor.kind === 'territory'
-              ? 'Удалить участок'
-              : editor.kind === 'entrance'
-                ? 'Удалить подъезд'
-                : 'Удалить квартиру'}
-          </Text>
-        </Pressable>
-      )}
     </Sheet>
   );
 }

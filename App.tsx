@@ -1,15 +1,13 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   BackHandler,
+  Image,
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   Text,
-  TextInput,
   View,
-  useWindowDimensions,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -17,21 +15,28 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import * as Updates from 'expo-updates';
 import {
   Apartment,
-  ApartmentStatus,
+  ApartmentMarker,
   AppData,
+  ArchiveEntry,
   EMPTY_DATA,
   Entrance,
-  STATUS,
   Territory,
+  VisitResult,
   allApartments,
   createDemo,
-  stats,
+  recordVisit,
+  toggleApartmentMarker,
   updateApartment,
 } from './src/model';
+import { archiveEntity, restoreArchive, splitApartment } from './src/lifecycle';
 import { loadData, saveData, waitForSave } from './src/storage';
 import { exportBackup, importBackup } from './src/backup';
 import { Editor, EntityEditor } from './src/EntityEditor';
-import { Button, C, Empty, Icon, IconButton, Progress, Sheet, s } from './src/ui';
+import { ApartmentGrid } from './src/ApartmentGrid';
+import { ApartmentMenu } from './src/ApartmentMenu';
+import { SharePanel } from './src/SharePanel';
+import { UpdatePrompt } from './src/UpdatePrompt';
+import { Button, C, Empty, Icon, IconButton, Sheet, s } from './src/ui';
 
 type Dialog = {
   title: string;
@@ -40,50 +45,39 @@ type Dialog = {
   actionLabel?: string;
   danger?: boolean;
 };
-
+type EntityMenu =
+  | { kind: 'territory'; value: Territory }
+  | { kind: 'entrance'; value: Entrance; territory: Territory };
 function AppContent() {
-  const { width } = useWindowDimensions();
   const [data, setData] = useState<AppData>(EMPTY_DATA);
+  const dataRef = useRef(data);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
+  const revision = useRef(0);
   const router = useRouter();
-  const selection = useLocalSearchParams<{ territory?: string; entrance?: string }>();
-  const territoryId = typeof selection.territory === 'string' ? selection.territory : null;
-  const entranceId = typeof selection.entrance === 'string' ? selection.entrance : null;
-  const setTerritoryId = useCallback(
-    (value: string | null) =>
-      router.setParams({ territory: value ?? undefined, entrance: undefined }),
-    [router],
-  );
-  const setEntranceId = useCallback(
-    (value: string | null) => router.setParams({ entrance: value ?? undefined }),
+  const params = useLocalSearchParams<{ territory?: string; entrance?: string }>();
+  const territoryId = typeof params.territory === 'string' ? params.territory : undefined;
+  const entranceId = typeof params.entrance === 'string' ? params.entrance : undefined;
+  const territory = data.territories.find((t) => t.id === territoryId);
+  const entrance = territory?.entrances.find((e) => e.id === entranceId);
+  const navigate = useCallback(
+    (territory?: string, entrance?: string) => router.setParams({ territory, entrance }),
     [router],
   );
   const [editor, setEditor] = useState<Editor | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = entrance?.apartments.find((a) => a.id === selectedId);
+  const [menu, setMenu] = useState<EntityMenu | null>(null);
   const [settings, setSettings] = useState(false);
+  const [archive, setArchive] = useState(false);
+  const [share, setShare] = useState(false);
   const [dialog, setDialog] = useState<Dialog | null>(null);
-  const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState<ApartmentStatus | 'all'>('all');
-  const [descending, setDescending] = useState(false);
-  const [toast, setToast] = useState('');
   const [busy, setBusy] = useState(false);
-  const revision = useRef(0);
-  const dataRef = useRef(data);
-  const scrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
+  const [toast, setToast] = useState('');
+  const [updateLater, setUpdateLater] = useState(false);
   const { isUpdatePending } = Updates.useUpdates();
-  const territory = data.territories.find((t) => t.id === territoryId);
-  const entrance = territory?.entrances.find((e) => e.id === entranceId);
-  const apartments = useMemo(
-    () =>
-      entrance?.apartments ??
-      (territory ? allApartments([territory]) : allApartments(data.territories)),
-    [data, territory, entrance],
-  );
-  const count = stats(apartments);
-  const columns = width > 900 ? 4 : width > 620 ? 3 : 2;
-  const tileWidth = (Math.min(width, 1040) - 40 - 12 * (columns - 1)) / columns;
-
+  const scrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
   useEffect(() => {
     loadData()
       .then((value) => {
@@ -92,7 +86,7 @@ function AppContent() {
         setLoaded(true);
       })
       .catch((error) => {
-        setLoadError(error instanceof Error ? error.message : 'Не удалось прочитать данные.');
+        setLoadError(String(error.message));
         setLoaded(true);
       });
   }, []);
@@ -109,134 +103,96 @@ function AppContent() {
         if (revision.current === current) setSaveState('error');
       });
   }
+  function safely(action: () => void) {
+    try {
+      action();
+    } catch (error) {
+      setDialog({
+        title: 'Не удалось выполнить действие',
+        message: error instanceof Error ? error.message : 'Попробуйте ещё раз.',
+      });
+    }
+  }
   useEffect(() => {
     if (!toast) return;
-    const timeout = setTimeout(() => setToast(''), 3200);
-    return () => clearTimeout(timeout);
+    const timer = setTimeout(() => setToast(''), 3000);
+    return () => clearTimeout(timer);
   }, [toast]);
   useEffect(() => {
     scrollRef.current?.scrollTo({ y: 0, animated: false });
   }, [territoryId, entranceId]);
-  const goBack = useCallback(() => {
-    setQuery('');
-    setFilter('all');
-    if (entranceId) setEntranceId(null);
-    else setTerritoryId(null);
-  }, [entranceId, setEntranceId, setTerritoryId]);
   useEffect(() => {
     const listener = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (editor) {
-        setEditor(null);
-        return true;
-      }
-      if (settings) {
-        setSettings(false);
-        return true;
-      }
-      if (entranceId || territoryId) {
-        goBack();
-        return true;
-      }
-      return false;
+      if (dialog) setDialog(null);
+      else if (editor) setEditor(null);
+      else if (selectedId) setSelectedId(null);
+      else if (menu) setMenu(null);
+      else if (share) setShare(false);
+      else if (archive) setArchive(false);
+      else if (settings) setSettings(false);
+      else if (entrance) navigate(territoryId);
+      else if (territory) navigate();
+      else return false;
+      return true;
     });
     return () => listener.remove();
-  }, [territoryId, entranceId, editor, settings, goBack]);
-
-  async function runExport() {
-    setBusy(true);
-    try {
-      await exportBackup(dataRef.current);
-      setToast(Platform.OS === 'web' ? 'Резервная копия скачана' : 'Резервная копия подготовлена');
-    } catch (e) {
-      setSettings(false);
-      setDialog({
-        title: 'Не удалось сохранить копию',
-        message: e instanceof Error ? e.message : 'Попробуйте ещё раз.',
-      });
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function runImport() {
-    setBusy(true);
-    try {
-      const incoming = await importBackup();
-      if (!incoming) return;
-      setSettings(false);
-      setDialog({
-        title: 'Восстановить из копии?',
-        message: `В файле участков: ${incoming.territories.length}, квартир: ${allApartments(incoming.territories).length}. Текущие данные будут заменены. Если они нужны, сначала сохраните свою копию.`,
-        actionLabel: 'Восстановить',
-        action: () => {
-          persist(incoming);
-          setLoadError('');
-          setTerritoryId(null);
-          setEntranceId(null);
-          setQuery('');
-          setToast('Данные восстановлены');
-        },
-      });
-    } catch (e) {
-      setSettings(false);
-      setDialog({
-        title: 'Копия не загружена',
-        message: `${e instanceof Error ? e.message : 'Не удалось прочитать файл.'} Текущие данные не изменены.`,
-      });
-    } finally {
-      setBusy(false);
-    }
-  }
-  function removeCurrent(kind: Editor['kind'], apartmentId?: string) {
-    const target =
-      kind === 'territory'
-        ? territory?.name
-        : kind === 'entrance'
-          ? entrance?.name
-          : `квартиру ${entrance?.apartments.find((a) => a.id === apartmentId)?.number}`;
+  }, [
+    dialog,
+    editor,
+    selectedId,
+    menu,
+    share,
+    archive,
+    settings,
+    entrance,
+    territory,
+    territoryId,
+    navigate,
+  ]);
+  function remove(kind: ArchiveEntry['kind'], tId: string, eId?: string, aId?: string) {
+    setMenu(null);
+    setSelectedId(null);
     setEditor(null);
     setDialog({
-      title: 'Удалить данные?',
-      message: `Удалить «${target}»${kind !== 'apartment' ? ' и все записи внутри' : ''}? Отменить действие можно только восстановлением из резервной копии.`,
+      title: kind === 'visits' ? 'Очистить посещения?' : 'Переместить в архив?',
+      message:
+        kind === 'visits'
+          ? 'Статус и счётчики посещений будут очищены. Прежние отметки сохранятся в архиве. Заметки и сведения останутся в квартире.'
+          : 'Запись и всё содержимое будут перемещены в архив. Их можно восстановить в настройках.',
+      actionLabel: kind === 'visits' ? 'Очистить' : 'В архив',
       danger: true,
-      actionLabel: 'Удалить',
-      action: () => {
-        const latest = dataRef.current;
-        if (kind === 'territory') {
-          persist({
-            ...latest,
-            territories: latest.territories.filter((t) => t.id !== territoryId),
-          });
-          setTerritoryId(null);
-          setEntranceId(null);
-        } else if (kind === 'entrance') {
-          persist({
-            ...latest,
-            territories: latest.territories.map((t) =>
-              t.id !== territoryId
-                ? t
-                : { ...t, entrances: t.entrances.filter((e) => e.id !== entranceId) },
-            ),
-          });
-          setEntranceId(null);
-        } else
-          persist({
-            ...latest,
-            territories: latest.territories.map((t) =>
-              t.id !== territoryId
-                ? t
-                : {
-                    ...t,
-                    entrances: t.entrances.map((e) =>
-                      e.id !== entranceId
-                        ? e
-                        : { ...e, apartments: e.apartments.filter((a) => a.id !== apartmentId) },
-                    ),
-                  },
-            ),
-          });
-        setToast('Запись удалена');
-      },
+      action: () =>
+        safely(() => {
+          persist(archiveEntity(dataRef.current, kind, tId, eId, aId));
+          if (kind === 'territory' && territoryId === tId) navigate();
+          if (kind === 'entrance' && entranceId === eId) navigate(tId);
+          setToast(kind === 'visits' ? 'Посещения очищены' : 'Перемещено в архив');
+        }),
     });
+  }
+  function changeApartment(change: (apartment: Apartment) => Apartment) {
+    if (!territory || !entrance || !selectedId) return;
+    const current = dataRef.current.territories
+      .find((t) => t.id === territory.id)
+      ?.entrances.find((e) => e.id === entrance.id)
+      ?.apartments.find((a) => a.id === selectedId);
+    if (current)
+      persist(
+        updateApartment(dataRef.current, territory.id, entrance.id, current.id, change(current)),
+      );
+  }
+  function markVisit(result: VisitResult) {
+    changeApartment((a) => recordVisit(a, result));
+    setSelectedId(null);
+  }
+  function toggleMarker(marker: ApartmentMarker) {
+    changeApartment((a) => toggleApartmentMarker(a, marker));
+  }
+  function editApartment() {
+    if (selected) {
+      setEditor({ kind: 'apartment', existing: selected });
+      setSelectedId(null);
+    }
   }
   function saveEntity(value: Territory | Entrance | Apartment) {
     if (!editor) return;
@@ -251,7 +207,7 @@ function AppContent() {
             )
           : [...latest.territories, item],
       });
-      if (!editor.existing) setTerritoryId(item.id);
+      if (!editor.existing) navigate(item.id);
     } else if (editor.kind === 'entrance' && territory) {
       const item = value as Entrance;
       persist({
@@ -267,7 +223,7 @@ function AppContent() {
               },
         ),
       });
-      if (!editor.existing) setEntranceId(item.id);
+      if (!editor.existing) navigate(territory.id, item.id);
     } else if (editor.kind === 'apartment' && territory && entrance) {
       const item = value as Apartment;
       persist({
@@ -294,495 +250,212 @@ function AppContent() {
     setEditor(null);
     setToast('Сохранено');
   }
-  function quickStatus(apartment: Apartment, status: ApartmentStatus) {
-    if (territory && entrance)
-      persist(
-        updateApartment(dataRef.current, territory.id, entrance.id, apartment.id, { status }),
-      );
+  function editEntity(target: EntityMenu) {
+    setMenu(null);
+    if (target.kind === 'territory') {
+      navigate(target.value.id);
+      setEditor({ kind: 'territory', existing: target.value });
+    } else {
+      navigate(target.territory.id, target.value.id);
+      setEditor({ kind: 'entrance', existing: target.value });
+    }
   }
-  const visible =
-    entrance?.apartments.filter(
-      (a) =>
-        (filter === 'all' || a.status === filter) &&
-        (!query.trim() ||
-          `${a.number} ${a.note}`
-            .toLocaleLowerCase('ru')
-            .includes(query.trim().toLocaleLowerCase('ru'))),
-    ) ?? [];
-  const floors = [...new Set(visible.map((a) => a.floor))].sort((a, b) =>
-    descending ? b - a : a - b,
-  );
+  async function runExport() {
+    setBusy(true);
+    try {
+      await exportBackup(dataRef.current);
+      setToast('Резервная копия подготовлена');
+    } catch (error) {
+      setSettings(false);
+      setDialog({ title: 'Не удалось сохранить копию', message: String(error) });
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function runImport() {
+    setBusy(true);
+    try {
+      const incoming = await importBackup();
+      if (!incoming) return;
+      setSettings(false);
+      setDialog({
+        title: 'Восстановить из копии?',
+        message: 'Текущие участки будут сохранены в архиве, затем заменены данными из файла.',
+        actionLabel: 'Восстановить',
+        action: () =>
+          safely(() => {
+            let previous = dataRef.current;
+            for (const t of previous.territories)
+              previous = archiveEntity(previous, 'territory', t.id);
+            const combined = [...incoming.archive, ...previous.archive];
+            persist({
+              ...incoming,
+              archive: combined.filter(
+                (entry, index) => combined.findIndex((other) => other.id === entry.id) === index,
+              ),
+            });
+            setLoadError('');
+            navigate();
+            setToast('Данные восстановлены');
+          }),
+      });
+    } catch (error) {
+      setSettings(false);
+      setDialog({
+        title: 'Копия не загружена',
+        message: error instanceof Error ? error.message : 'Не удалось прочитать файл.',
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function applyUpdate() {
+    await waitForSave();
+    await Updates.reloadAsync();
+  }
   if (!loaded)
     return (
       <View style={s.loading}>
-        <ActivityIndicator color={C.green} size="large" />
+        <ActivityIndicator color={C.accent} />
         <Text style={s.muted}>Открываем участки…</Text>
       </View>
     );
-
   return (
     <SafeAreaView style={s.root} edges={['top', 'bottom']}>
       <StatusBar style="dark" />
       <View style={s.topbar}>
-        <View style={s.topbarInner}>
-          <View style={s.inline}>
-            <View style={s.logo}>
-              <Icon name="grid-outline" color="#FFFFFF" size={21} />
-            </View>
-            <View>
-              <Text style={s.brand}>Участки</Text>
-              <Text style={s.brandSub}>Журнал обхода</Text>
-            </View>
-          </View>
-          <View style={s.inline}>
-            <Pressable
-              onPress={() => saveState === 'error' && persist(dataRef.current)}
-              accessibilityRole="button"
-              accessibilityLabel={
-                saveState === 'error' ? 'Ошибка сохранения. Повторить' : 'Состояние сохранения'
-              }
-              style={s.saveBadge}
+        <View style={[s.topbarInner, { gap: 10, paddingHorizontal: 16 }]}>
+          <Image
+            source={require('./assets/icon.png')}
+            style={{ width: 42, height: 42, borderRadius: 11 }}
+            accessibilityLabel="Участки"
+          />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Поделиться приложением с другими"
+            onPress={() => setShare(true)}
+            style={[s.flex, { minHeight: 44, justifyContent: 'center' }]}
+          >
+            <Text
+              style={{ color: C.accentStrong, fontSize: 13, lineHeight: 17, fontWeight: '600' }}
             >
-              <Icon
-                name={
-                  saveState === 'error'
-                    ? 'warning-outline'
-                    : saveState === 'saving'
-                      ? 'sync-outline'
-                      : 'checkmark-circle-outline'
-                }
-                color={saveState === 'error' ? C.red : C.green}
-                size={15}
-              />
-              <Text style={[s.saveText, saveState === 'error' && { color: C.red }]}>
-                {saveState === 'error'
-                  ? 'Повторить'
-                  : saveState === 'saving'
-                    ? 'Сохраняем'
-                    : 'Сохранено'}
-              </Text>
-            </Pressable>
-            <IconButton
-              name="options-outline"
-              label="Настройки и резервная копия"
-              onPress={() => setSettings(true)}
-            />
-          </View>
+              Поделиться приложением с другими
+            </Text>
+          </Pressable>
+          <IconButton
+            name="ellipsis-horizontal"
+            label="Настройки и резервная копия"
+            onPress={() => setSettings(true)}
+          />
         </View>
       </View>
-      {isUpdatePending && (
-        <Pressable
-          accessibilityRole="button"
-          onPress={async () => {
-            try {
-              await waitForSave();
-              await Updates.reloadAsync();
-            } catch {
-              setDialog({
-                title: 'Обновление отложено',
-                message: 'Сначала сохраните данные и повторите попытку.',
-              });
-            }
-          }}
-          style={s.updateBanner}
-        >
-          <Icon name="refresh" color={C.green} size={18} />
-          <Text style={s.updateText}>Новая версия готова. Нажмите, чтобы обновить.</Text>
-        </Pressable>
-      )}
       {loadError ? (
-        <View style={[s.content, { gap: 20, paddingTop: 60 }]}>
-          <Icon name="shield-outline" size={44} color={C.amber} />
-          <Text style={s.title}>Данные требуют внимания</Text>
-          <Text style={s.body}>
-            {loadError} Исходная запись на устройстве не будет перезаписана автоматически.
-          </Text>
-          <Button
-            title="Загрузить резервную копию"
-            icon="cloud-upload-outline"
-            onPress={() => void runImport()}
-            disabled={busy}
-          />
-          <Button
-            title="Начать заново"
-            secondary
-            onPress={() =>
-              setDialog({
-                title: 'Начать заново?',
-                message: 'Повреждённая запись на этом устройстве будет заменена пустым журналом.',
-                actionLabel: 'Начать заново',
-                danger: true,
-                action: () => {
-                  persist(EMPTY_DATA);
-                  setLoadError('');
-                },
-              })
-            }
-          />
+        <View style={[s.content, { paddingTop: 40, gap: 20 }]}>
+          <Text style={s.sheetTitle}>Данные требуют внимания</Text>
+          <Text style={s.body}>{loadError}</Text>
+          <Button title="Загрузить резервную копию" onPress={() => void runImport()} />
         </View>
       ) : (
-        <ScrollView
-          ref={scrollRef}
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ paddingBottom: 30 }}
-        >
+        <ScrollView ref={scrollRef} contentContainerStyle={{ paddingBottom: 30 }}>
           <View style={s.content}>
             {territory && (
-              <Pressable accessibilityRole="button" onPress={goBack} style={s.back}>
-                <Icon name="arrow-back" size={18} color={C.green} />
-                <Text style={s.backText}>{entrance ? territory.name : 'Все участки'}</Text>
-              </Pressable>
-            )}
-            <View style={s.pageHeading}>
-              <View style={s.flex}>
-                <Text style={s.eyebrow}>
-                  {entrance
-                    ? 'КВАРТИРЫ ПО ЭТАЖАМ'
-                    : territory
-                      ? 'ВАШ УЧАСТОК'
-                      : 'ПОРЯДОК В КАЖДОМ ОБХОДЕ'}
-                </Text>
-                <Text accessibilityRole="header" style={s.title}>
-                  {entrance?.name ?? territory?.name ?? 'Мои участки'}
-                </Text>
-                <Text style={s.subtitle}>
-                  {entrance
-                    ? `${territory?.name}${territory?.address ? ` · ${territory.address}` : ''}`
-                    : territory
-                      ? territory.address || 'Подъезды, квартиры и результаты обхода'
-                      : 'Всё нужное — под рукой, даже без интернета.'}
-                </Text>
+              <View style={[s.inline, { marginVertical: 14, flexWrap: 'wrap' }]}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Все участки"
+                  onPress={() => navigate()}
+                  style={{ paddingVertical: 10 }}
+                >
+                  <Text style={s.backText}>Участки</Text>
+                </Pressable>
+                <Text style={s.muted}>/</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => navigate(territory.id)}
+                  style={{ paddingVertical: 10 }}
+                >
+                  <Text style={s.backText}>{territory.name}</Text>
+                </Pressable>
+                {entrance && (
+                  <>
+                    <Text style={s.muted}>/</Text>
+                    <Text style={s.backText}>{entrance.name}</Text>
+                  </>
+                )}
               </View>
-              {territory && (
-                <IconButton
-                  name="ellipsis-horizontal"
-                  label={entrance ? 'Редактировать подъезд' : 'Редактировать участок'}
+            )}
+            <View style={[s.sectionHeading, { marginTop: territory ? 0 : 24 }]}>
+              <Text style={s.sectionTitle}>
+                {entrance ? 'Квартиры' : territory ? 'Подъезды' : 'Участки'}
+              </Text>
+              <View style={s.inline}>
+                <Button
+                  title="Добавить"
+                  small
+                  icon="add"
                   onPress={() =>
-                    setEditor(
-                      entrance
-                        ? { kind: 'entrance', existing: entrance }
-                        : { kind: 'territory', existing: territory },
-                    )
+                    setEditor({
+                      kind: entrance ? 'apartment' : territory ? 'entrance' : 'territory',
+                    })
                   }
                 />
-              )}
-            </View>
-            <View style={s.summary}>
-              <View style={[s.inline, { justifyContent: 'space-between', marginBottom: 20 }]}>
-                <View style={s.flex}>
-                  <Text style={s.summaryEyebrow}>РЕЗУЛЬТАТЫ ОБХОДА</Text>
-                  <Text style={s.summaryTitle}>
-                    {count.total
-                      ? `${Math.round((count.visited / count.total) * 100)}% квартир пройдено`
-                      : 'Начнём с первого участка'}
-                  </Text>
-                </View>
-                <View style={s.summaryIcon}>
-                  <Icon
-                    name={count.total ? 'footsteps-outline' : 'home-outline'}
-                    size={25}
-                    color="#DCE8CD"
+                {territory && (
+                  <IconButton
+                    name="ellipsis-horizontal"
+                    label={entrance ? 'Меню подъезда' : 'Меню участка'}
+                    onPress={() =>
+                      setMenu(
+                        entrance
+                          ? { kind: 'entrance', value: entrance, territory }
+                          : { kind: 'territory', value: territory },
+                      )
+                    }
                   />
-                </View>
+                )}
               </View>
-              <View style={s.counters}>
-                {[
-                  { value: count.total, label: 'Всего квартир' },
-                  { value: count.visited, label: 'Пройдены', dot: '#BFD6AA' },
-                  { value: count.absent, label: 'Никого нет', dot: '#E4BD7E' },
-                ].map((c) => (
-                  <View key={c.label} style={s.counter}>
-                    <Text style={s.counterValue}>{c.value}</Text>
-                    <View style={s.inline}>
-                      {c.dot && <View style={[s.dot, { backgroundColor: c.dot }]} />}
-                      <Text style={s.counterLabel}>{c.label}</Text>
-                    </View>
-                  </View>
-                ))}
-              </View>
-              {!!count.total && (
-                <View style={[s.progress, { backgroundColor: '#45604B', marginTop: 20 }]}>
-                  <View
-                    style={{
-                      width: `${(count.visited / count.total) * 100}%`,
-                      backgroundColor: '#BFD6AA',
-                    }}
-                  />
-                  <View
-                    style={{
-                      width: `${(count.absent / count.total) * 100}%`,
-                      backgroundColor: '#E4BD7E',
-                    }}
-                  />
-                </View>
-              )}
-            </View>
-            <View style={s.sectionHeading}>
-              <View style={s.inline}>
-                <Text style={s.sectionTitle}>
-                  {entrance ? 'Квартиры' : territory ? 'Подъезды' : 'Участки'}
-                </Text>
-                <View style={s.countBadge}>
-                  <Text style={s.countBadgeText}>
-                    {entrance
-                      ? entrance.apartments.length
-                      : territory
-                        ? territory.entrances.length
-                        : data.territories.length}
-                  </Text>
-                </View>
-              </View>
-              <Button
-                small
-                title="Добавить"
-                icon="add"
-                onPress={() =>
-                  setEditor({ kind: entrance ? 'apartment' : territory ? 'entrance' : 'territory' })
-                }
-              />
             </View>
             {entrance ? (
               <>
-                <View style={s.search}>
-                  <Icon name="search-outline" color={C.muted} />
-                  <TextInput
-                    accessibilityLabel="Поиск квартиры или заметки"
-                    placeholder="Номер квартиры или заметка"
-                    placeholderTextColor="#92998C"
-                    style={s.searchInput}
-                    value={query}
-                    onChangeText={setQuery}
-                  />
-                  {!!query && (
-                    <IconButton
-                      name="close-circle"
-                      label="Очистить поиск"
-                      onPress={() => setQuery('')}
-                    />
-                  )}
-                </View>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={s.filters}
-                >
-                  {(['all', 'unvisited', 'visited', 'absent'] as const).map((value) => (
-                    <Pressable
-                      key={value}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: filter === value }}
-                      onPress={() => setFilter(value)}
-                      style={[s.filter, filter === value && s.filterActive]}
-                    >
-                      <Text style={[s.filterText, filter === value && s.filterTextActive]}>
-                        {value === 'all'
-                          ? `Все · ${count.total}`
-                          : `${STATUS[value].short} · ${count[value]}`}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </ScrollView>
-                <View
-                  style={[
-                    s.inline,
-                    { justifyContent: 'space-between', marginTop: 8, marginBottom: 16 },
-                  ]}
-                >
-                  <Text style={s.smallMuted}>Нажмите на квартиру, чтобы добавить заметку</Text>
-                  <IconButton
-                    name={descending ? 'arrow-down' : 'arrow-up'}
-                    label="Изменить порядок этажей"
-                    onPress={() => setDescending(!descending)}
-                  />
-                </View>
-                {floors.map((floor) => (
-                  <View key={floor} style={s.floorSection}>
-                    <View style={s.floorHeading}>
-                      <Text style={s.floorTitle}>
-                        {floor === 0 ? 'Цокольный этаж' : `${floor} этаж`}
-                      </Text>
-                      <View style={s.floorLine} />
-                      <Text style={s.smallMuted}>
-                        {visible.filter((a) => a.floor === floor).length} кв.
-                      </Text>
-                    </View>
-                    <View style={s.apartmentGrid}>
-                      {visible
-                        .filter((a) => a.floor === floor)
-                        .sort((a, b) => a.number.localeCompare(b.number, 'ru', { numeric: true }))
-                        .map((a) => (
-                          <View
-                            key={a.id}
-                            style={[
-                              s.apartmentCard,
-                              { width: tileWidth },
-                              a.status === 'visited' && { borderColor: '#D2E0CB' },
-                              a.status === 'absent' && { borderColor: '#EADABF' },
-                            ]}
-                          >
-                            <Pressable
-                              accessibilityRole="button"
-                              accessibilityLabel={`Квартира ${a.number}, ${STATUS[a.status].label}${a.note ? ', есть заметка' : ''}`}
-                              onPress={() => setEditor({ kind: 'apartment', existing: a })}
-                              style={s.apartmentMain}
-                            >
-                              <View
-                                style={[
-                                  s.inline,
-                                  { justifyContent: 'space-between', alignItems: 'flex-start' },
-                                ]}
-                              >
-                                <View style={s.flex}>
-                                  <Text style={s.apartmentLabel}>КВАРТИРА</Text>
-                                  <Text style={s.apartmentNumber} numberOfLines={1}>
-                                    {a.number}
-                                  </Text>
-                                </View>
-                                {a.note ? (
-                                  <View style={s.noteDot}>
-                                    <Icon name="document-text-outline" size={16} color={C.green} />
-                                  </View>
-                                ) : (
-                                  <Icon name="chevron-forward" size={16} color="#BCC3B6" />
-                                )}
-                              </View>
-                              <View
-                                style={[
-                                  s.statusBadge,
-                                  { backgroundColor: STATUS[a.status].background },
-                                ]}
-                              >
-                                <View
-                                  style={[
-                                    s.dot,
-                                    {
-                                      backgroundColor: STATUS[a.status].color,
-                                      width: 5,
-                                      height: 5,
-                                    },
-                                  ]}
-                                />
-                                <Text
-                                  numberOfLines={2}
-                                  style={[s.statusLabel, { color: STATUS[a.status].color }]}
-                                >
-                                  {STATUS[a.status].label}
-                                </Text>
-                              </View>
-                              {!!a.note && (
-                                <Text style={s.apartmentNote} numberOfLines={2}>
-                                  {a.note}
-                                </Text>
-                              )}
-                            </Pressable>
-                            <View style={s.quickActions}>
-                              <Pressable
-                                accessibilityRole="button"
-                                accessibilityLabel={`Отметить квартиру ${a.number} пройденной`}
-                                accessibilityState={{ selected: a.status === 'visited' }}
-                                onPress={() => quickStatus(a, 'visited')}
-                                style={[
-                                  s.quickButton,
-                                  a.status === 'visited' && { backgroundColor: '#E8F0E5' },
-                                ]}
-                              >
-                                <Icon name="checkmark" size={18} color={C.green} />
-                                <Text style={s.quickLabel}>Пройдена</Text>
-                              </Pressable>
-                              <View style={s.quickDivider} />
-                              <Pressable
-                                accessibilityRole="button"
-                                accessibilityLabel={`Квартира ${a.number}: никого не застали`}
-                                accessibilityState={{ selected: a.status === 'absent' }}
-                                onPress={() => quickStatus(a, 'absent')}
-                                style={[
-                                  s.quickButton,
-                                  a.status === 'absent' && { backgroundColor: '#FBF0DD' },
-                                ]}
-                              >
-                                <Icon name="time-outline" size={18} color={C.amber} />
-                              </Pressable>
-                            </View>
-                          </View>
-                        ))}
-                    </View>
-                  </View>
-                ))}
-                {!floors.length && (
+                <ApartmentGrid
+                  apartments={entrance.apartments}
+                  onOpen={(a) => setSelectedId(a.id)}
+                />
+                {!entrance.apartments.length && (
                   <Empty
-                    icon="search-outline"
-                    title={entrance.apartments.length ? 'Ничего не найдено' : 'Квартир пока нет'}
-                    text={
-                      entrance.apartments.length
-                        ? 'Измените поиск или выберите другой статус.'
-                        : 'Добавьте квартиру и укажите её этаж.'
-                    }
-                  >
-                    {!!entrance.apartments.length && (
-                      <Button
-                        title="Сбросить фильтры"
-                        secondary
-                        onPress={() => {
-                          setQuery('');
-                          setFilter('all');
-                        }}
-                      />
-                    )}
-                  </Empty>
+                    icon="grid-outline"
+                    title="Квартир пока нет"
+                    text="Добавьте квартиру и укажите её этаж."
+                  />
                 )}
               </>
             ) : territory ? (
               <>
-                {territory.entrances.map((e) => {
-                  const result = stats(e.apartments);
-                  const numbers = e.apartments
-                    .map((a) => a.number)
-                    .sort((a, b) => a.localeCompare(b, 'ru', { numeric: true }));
-                  return (
+                {territory.entrances.map((e) => (
+                  <View key={e.id} style={[s.listCard, s.inline, { padding: 14 }]}>
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel={`Открыть ${e.name}`}
-                      key={e.id}
-                      onPress={() => {
-                        setEntranceId(e.id);
-                        setQuery('');
-                        setFilter('all');
-                      }}
-                      style={({ pressed }) => [s.listCard, pressed && { opacity: 0.75 }]}
+                      onPress={() => navigate(territory.id, e.id)}
+                      style={s.flex}
                     >
-                      <View style={s.cardHeader}>
-                        <View style={s.cardIcon}>
-                          <Icon name="business-outline" size={25} color={C.green} />
-                        </View>
-                        <View style={s.flex}>
-                          <Text style={s.cardTitle}>{e.name}</Text>
-                          <Text style={s.cardSubtitle}>
-                            {numbers.length
-                              ? `Квартиры ${numbers[0]}–${numbers[numbers.length - 1]} · Этажей: ${new Set(e.apartments.map((a) => a.floor)).size}`
-                              : 'Квартир пока нет'}
-                          </Text>
-                        </View>
-                        <Icon name="chevron-forward" color={C.muted} />
-                      </View>
-                      <Progress apartments={e.apartments} />
-                      <View style={s.cardFooter}>
-                        <Text style={s.smallMuted}>
-                          Пройдено {result.visited} из {result.total}
-                        </Text>
-                        <Text style={s.cardLink}>Открыть подъезд ↗</Text>
-                      </View>
+                      <Text style={s.cardTitle}>{e.name}</Text>
+                      <Text style={s.cardSubtitle}>Квартир: {e.apartments.length}</Text>
                     </Pressable>
-                  );
-                })}
+                    <IconButton
+                      name="ellipsis-horizontal"
+                      label={`Меню ${e.name}`}
+                      onPress={() => setMenu({ kind: 'entrance', value: e, territory })}
+                    />
+                  </View>
+                ))}
                 {!territory.entrances.length && (
                   <Empty
                     icon="business-outline"
                     title="Добавьте первый подъезд"
-                    text={'Укажите этажи и количество квартир.\nМы создадим их автоматически.'}
+                    text="Квартиры создадутся автоматически по этажам."
                   >
                     <Button
                       title="Создать подъезд"
-                      icon="add"
                       onPress={() => setEditor({ kind: 'entrance' })}
                     />
                   </Empty>
@@ -790,83 +463,95 @@ function AppContent() {
               </>
             ) : (
               <>
-                {data.territories.map((t) => {
-                  const all = allApartments([t]);
-                  const result = stats(all);
-                  return (
+                {data.territories.map((t) => (
+                  <View key={t.id} style={[s.listCard, s.inline, { padding: 14 }]}>
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel={`Открыть участок ${t.name}`}
-                      key={t.id}
-                      onPress={() => setTerritoryId(t.id)}
-                      style={({ pressed }) => [s.listCard, pressed && { opacity: 0.75 }]}
+                      onPress={() => navigate(t.id)}
+                      style={s.flex}
                     >
-                      <View style={s.cardHeader}>
-                        <View style={s.cardIcon}>
-                          <Icon name="map-outline" size={25} color={C.green} />
-                        </View>
-                        <View style={s.flex}>
-                          <Text style={s.cardTitle}>{t.name}</Text>
-                          <Text style={s.cardSubtitle}>{t.address || 'Адрес не указан'}</Text>
-                        </View>
-                        <Icon name="chevron-forward" color={C.muted} />
-                      </View>
-                      <View style={[s.inline, { gap: 18, marginBottom: 16 }]}>
-                        <Text style={s.meta}>Подъездов: {t.entrances.length}</Text>
-                        <Text style={s.meta}>Квартир: {result.total}</Text>
-                      </View>
-                      <Progress apartments={all} />
-                      <View style={s.cardFooter}>
-                        <Text style={s.smallMuted}>
-                          Пройдено {result.visited} из {result.total}
-                        </Text>
-                        <Text style={s.cardLink}>Открыть участок ↗</Text>
-                      </View>
+                      <Text style={s.cardTitle}>{t.name}</Text>
+                      <Text style={s.cardSubtitle}>
+                        Подъездов: {t.entrances.length} · Квартир: {allApartments([t]).length}
+                      </Text>
                     </Pressable>
-                  );
-                })}
+                    <IconButton
+                      name="ellipsis-horizontal"
+                      label={`Меню участка ${t.name}`}
+                      onPress={() => setMenu({ kind: 'territory', value: t })}
+                    />
+                  </View>
+                ))}
                 {!data.territories.length && (
                   <Empty
                     icon="map-outline"
-                    title="Здесь начинается ваш обход"
-                    text={
-                      'Создайте участок, добавьте подъезды\nи отмечайте результаты по квартирам.'
-                    }
+                    title="Мои участки"
+                    text="Создайте участок для начала обхода."
                   >
                     <Button
                       title="Создать первый участок"
-                      icon="add"
                       onPress={() => setEditor({ kind: 'territory' })}
                     />
                     <Pressable
                       accessibilityRole="button"
-                      onPress={() => {
-                        persist(createDemo());
-                        setToast('Добавлен учебный участок');
-                      }}
+                      onPress={() =>
+                        persist({ ...dataRef.current, territories: createDemo().territories })
+                      }
                       style={s.demoButton}
                     >
                       <Text style={s.demoText}>Открыть учебный пример</Text>
-                      <Icon name="arrow-forward" size={15} color={C.muted} />
                     </Pressable>
                   </Empty>
                 )}
               </>
             )}
-            <View style={s.localInfo}>
-              <Icon name="phone-portrait-outline" size={17} color={C.muted} />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Состояние сохранения"
+              onPress={() => saveState === 'error' && persist(dataRef.current)}
+              style={s.localInfo}
+            >
+              <Icon
+                name={saveState === 'error' ? 'warning-outline' : 'checkmark-circle-outline'}
+                size={15}
+                color={saveState === 'error' ? C.red : C.muted}
+              />
               <Text style={s.localInfoText}>
-                {'Данные хранятся на этом устройстве.\nСохраняйте резервную копию в настройках.'}
+                {saveState === 'error'
+                  ? 'Не сохранено. Нажмите для повтора'
+                  : saveState === 'saving'
+                    ? 'Сохраняем…'
+                    : 'Сохранено на устройстве'}
               </Text>
-            </View>
+            </Pressable>
           </View>
         </ScrollView>
       )}
-      {!!toast && (
-        <View pointerEvents="none" style={s.toast}>
-          <Icon name="checkmark-circle" size={18} color="#D7EBCB" />
-          <Text style={s.toastText}>{toast}</Text>
-        </View>
+      {selected && (
+        <ApartmentMenu
+          key={selected.id}
+          apartment={selected}
+          onClose={() => setSelectedId(null)}
+          onResult={markVisit}
+          onEdit={editApartment}
+          onToggleMarker={toggleMarker}
+          onAction={(action) => {
+            if (!territory || !entrance) return;
+            if (action === 'split') {
+              safely(() =>
+                persist(splitApartment(dataRef.current, territory.id, entrance.id, selected.id)),
+              );
+              setSelectedId(null);
+            } else
+              remove(
+                action === 'clear' ? 'visits' : 'apartment',
+                territory.id,
+                entrance.id,
+                selected.id,
+              );
+          }}
+        />
       )}
       {editor && (
         <EntityEditor
@@ -875,75 +560,111 @@ function AppContent() {
           territory={territory}
           entrance={entrance}
           onClose={() => setEditor(null)}
-          onDelete={() =>
-            removeCurrent(
-              editor.kind,
-              editor.kind === 'apartment' ? editor.existing?.id : undefined,
-            )
-          }
           onSave={saveEntity}
         />
       )}
-      {settings && (
-        <Sheet
-          title="Данные и настройки"
-          subtitle="Всё хранится на вашем устройстве"
-          onClose={() => setSettings(false)}
-        >
-          <View style={s.infoBox}>
-            <Icon name="shield-checkmark-outline" size={25} color={C.green} />
-            <Text style={s.infoText}>
-              Приложение работает без интернета и регистрации. Автоматической синхронизации между
-              телефонами нет.
-            </Text>
+      {menu && (
+        <Sheet title={menu.value.name} onClose={() => setMenu(null)}>
+          <View style={{ gap: 10 }}>
+            <Button title="Переименовать" secondary onPress={() => editEntity(menu)} />
+            <Button title="Изменить" secondary onPress={() => editEntity(menu)} />
+            <Button
+              title={menu.kind === 'territory' ? 'Удалить участок' : 'Удалить подъезд'}
+              danger
+              onPress={() =>
+                remove(
+                  menu.kind,
+                  menu.kind === 'territory' ? menu.value.id : menu.territory.id,
+                  menu.kind === 'entrance' ? menu.value.id : undefined,
+                )
+              }
+            />
           </View>
-          <Text style={s.settingsTitle}>Резервная копия</Text>
-          <Text style={[s.body, { marginBottom: 20 }]}>
-            Сохраните файл с участками, статусами и заметками. Его можно перенести на другой
-            телефон. При удалении приложения локальные данные могут быть потеряны.
-          </Text>
+        </Sheet>
+      )}
+      {settings && (
+        <Sheet title="Данные и настройки" onClose={() => setSettings(false)}>
           <View style={{ gap: 12 }}>
             <Button
+              title="Архив"
+              icon="archive-outline"
+              secondary
+              onPress={() => {
+                setSettings(false);
+                setArchive(true);
+              }}
+            />
+            <Button
               title={busy ? 'Подождите…' : 'Сохранить копию в файл'}
-              icon="download-outline"
-              onPress={() => void runExport()}
               disabled={busy || !!loadError}
+              onPress={() => void runExport()}
             />
             <Button
               title="Восстановить из файла"
-              icon="cloud-upload-outline"
               secondary
-              onPress={() => void runImport()}
               disabled={busy}
+              onPress={() => void runImport()}
             />
+            {isUpdatePending && (
+              <Button
+                title="Обновить приложение"
+                onPress={() => {
+                  setSettings(false);
+                  setUpdateLater(false);
+                }}
+              />
+            )}
           </View>
-          <View style={s.settingsDivider} />
-          <Text style={s.settingsTitle}>Обновления</Text>
-          <Text style={s.body}>
-            {Updates.isEnabled
-              ? 'Обновления проверяются при запуске через бесплатный сервис Expo. Готовое обновление можно применить из уведомления вверху экрана.'
-              : 'В этой сборке обновления ещё не настроены. Данные и все функции обхода работают автономно.'}
+          <Text style={[s.smallMuted, { marginTop: 22 }]}>
+            Посещения сохраняются без интернета. Удалённые записи находятся в архиве.
           </Text>
-          <Text style={[s.smallMuted, { marginTop: 14 }]}>
-            На iPhone при бесплатной установке через Sideloadly подпись нужно обновлять каждые 7
-            дней. Обновление приложения не продлевает подпись.
-          </Text>
-          <Text style={s.version}>Участки · версия 1.0.0</Text>
+          <Text style={s.version}>Участки · 1.0.1</Text>
         </Sheet>
       )}
+      {archive && (
+        <Sheet title="Архив" onClose={() => setArchive(false)}>
+          {!data.archive.length && <Text style={s.body}>Архив пуст</Text>}
+          {data.archive.map((entry) => (
+            <View key={entry.id} style={s.listCard}>
+              <Text style={s.cardTitle}>
+                {'number' in entry.value ? `Квартира ${entry.value.number}` : entry.value.name}
+              </Text>
+              <Text style={[s.smallMuted, { marginVertical: 10 }]}>
+                {entry.kind === 'visits' ? 'Прежние посещения' : 'Удалённая запись'} ·{' '}
+                {new Date(entry.deletedAt).toLocaleDateString('ru-RU')}
+              </Text>
+              <Button
+                title="Восстановить"
+                small
+                secondary
+                onPress={() => {
+                  setArchive(false);
+                  setDialog({
+                    title: 'Восстановить запись?',
+                    message:
+                      entry.kind === 'visits'
+                        ? 'Прежние статус и счётчики заменят текущие отметки. Текущие посещения сохранятся в архиве. Заметки останутся.'
+                        : 'Запись вернётся в исходный участок и подъезд.',
+                    actionLabel: 'Восстановить',
+                    action: () =>
+                      safely(() => {
+                        persist(restoreArchive(dataRef.current, entry.id));
+                        setToast('Восстановлено');
+                      }),
+                  });
+                }}
+              />
+            </View>
+          ))}
+        </Sheet>
+      )}
+      {share && <SharePanel onClose={() => setShare(false)} />}
       {dialog && (
         <Modal visible transparent animationType="fade" onRequestClose={() => setDialog(null)}>
           <View style={s.dialogBackdrop}>
             <View accessibilityViewIsModal style={s.dialog}>
-              <View style={[s.inline, { marginBottom: 14 }]}>
-                <Icon
-                  name={dialog.danger ? 'warning-outline' : 'information-circle-outline'}
-                  color={dialog.danger ? C.red : C.green}
-                  size={25}
-                />
-                <Text style={[s.sheetTitle, s.flex]}>{dialog.title}</Text>
-              </View>
-              <Text style={[s.body, { marginBottom: 24 }]}>{dialog.message}</Text>
+              <Text style={s.sheetTitle}>{dialog.title}</Text>
+              <Text style={[s.body, { marginVertical: 22 }]}>{dialog.message}</Text>
               <View style={{ gap: 10 }}>
                 {dialog.action && (
                   <Button
@@ -965,6 +686,26 @@ function AppContent() {
             </View>
           </View>
         </Modal>
+      )}
+      <UpdatePrompt
+        visible={
+          isUpdatePending &&
+          !updateLater &&
+          !dialog &&
+          !editor &&
+          !selected &&
+          !menu &&
+          !settings &&
+          !share &&
+          !archive
+        }
+        onApply={applyUpdate}
+        onLater={() => setUpdateLater(true)}
+      />
+      {!!toast && (
+        <View style={s.toast} pointerEvents="none">
+          <Text style={s.toastText}>{toast}</Text>
+        </View>
       )}
     </SafeAreaView>
   );

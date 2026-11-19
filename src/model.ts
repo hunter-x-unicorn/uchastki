@@ -1,18 +1,49 @@
-export type ApartmentStatus = 'unvisited' | 'visited' | 'absent';
+import { C } from './theme';
+
+export type ApartmentStatus = 'unvisited' | 'visited' | 'absent' | 'refused' | 'repeat' | 'called';
+export type VisitResult = 'absent' | 'refused' | 'repeat' | 'called';
+export const MARKER_KEYS = ['noIntercom', 'noBell', 'noPhone', 'pencil'] as const;
+export type ApartmentMarker = (typeof MARKER_KEYS)[number];
+export type ApartmentMarkers = Record<ApartmentMarker, boolean>;
+export const EMPTY_MARKERS: ApartmentMarkers = {
+  noIntercom: false,
+  noBell: false,
+  noPhone: false,
+  pencil: false,
+};
+export const MARKER_LABELS: Record<ApartmentMarker, string> = {
+  noIntercom: 'Нет домофона',
+  noBell: 'Нет звонка',
+  noPhone: 'Нет телефона',
+  pencil: 'Отметка карандашом',
+};
+export const EMPTY_DETAILS = { name: '', phone: '', preferredTime: '' };
 
 export type Apartment = {
   id: string;
   number: string;
   floor: number;
   status: ApartmentStatus;
+  absentCount: number;
+  repeatCount: number;
+  markers: ApartmentMarkers;
   note: string;
+  details: typeof EMPTY_DETAILS;
   updatedAt: string | null;
 };
 
 export type Entrance = { id: string; name: string; apartments: Apartment[] };
 export type Territory = { id: string; name: string; address: string; entrances: Entrance[] };
-export type AppData = { version: 1; territories: Territory[] };
-export const EMPTY_DATA: AppData = { version: 1, territories: [] };
+export type ArchiveEntry = {
+  id: string;
+  kind: 'territory' | 'entrance' | 'apartment' | 'visits';
+  deletedAt: string;
+  territory?: Pick<Territory, 'id' | 'name' | 'address'>;
+  entrance?: Pick<Entrance, 'id' | 'name'>;
+  value: Territory | Entrance | Apartment;
+};
+export type AppData = { version: 1; territories: Territory[]; archive: ArchiveEntry[] };
+export const EMPTY_DATA: AppData = { version: 1, territories: [], archive: [] };
 export const STATUS: Record<
   ApartmentStatus,
   { label: string; short: string; color: string; background: string }
@@ -20,24 +51,87 @@ export const STATUS: Record<
   unvisited: {
     label: 'Не посещена',
     short: 'Не посещены',
-    color: '#6B7069',
-    background: '#F0F1ED',
+    color: C.muted,
+    background: C.soft,
   },
-  visited: { label: 'Пройдена', short: 'Пройдены', color: '#3D6645', background: '#E8F0E5' },
+  visited: {
+    label: 'Пройдена',
+    short: 'Пройдены',
+    color: C.accentStrong,
+    background: C.visitedBackground,
+  },
   absent: {
-    label: 'Никого не застали',
-    short: 'Никого нет',
-    color: '#936225',
-    background: '#FBF0DD',
+    label: 'Не застали',
+    short: 'Не застали',
+    color: '#484848',
+    background: '#BDBDBD',
+  },
+  refused: {
+    label: 'Отказ',
+    short: 'Отказ',
+    color: '#771E1E',
+    background: '#E86565',
+  },
+  repeat: {
+    label: 'Повтор',
+    short: 'Повтор',
+    color: '#18582D',
+    background: '#6EBB80',
+  },
+  called: {
+    label: 'Позвонил',
+    short: 'Позвонил',
+    color: C.accentStrong,
+    background: '#A8C4EA',
   },
 };
+
+export function toggleApartmentMarker(apartment: Apartment, marker: ApartmentMarker): Apartment {
+  return {
+    ...apartment,
+    markers: { ...apartment.markers, [marker]: !apartment.markers[marker] },
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function recordVisit(apartment: Apartment, result: VisitResult): Apartment {
+  return {
+    ...apartment,
+    status: result,
+    absentCount: apartment.absentCount + (result === 'absent' ? 1 : 0),
+    repeatCount: apartment.repeatCount + (result === 'repeat' ? 1 : 0),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function apartmentAppearance(apartment: Apartment) {
+  const count =
+    apartment.status === 'absent'
+      ? apartment.absentCount
+      : apartment.status === 'repeat'
+        ? apartment.repeatCount
+        : 0;
+  const completed = count >= 10;
+  return {
+    background: completed
+      ? apartment.status === 'absent'
+        ? '#161616'
+        : '#B8860B'
+      : STATUS[apartment.status].background,
+    color: completed ? '#FFFFFF' : '#151515',
+    dots: Math.min(count, 10),
+    completed,
+  };
+}
 
 export function id(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
 }
 
 export function stats(apartments: Apartment[]) {
-  const visited = apartments.filter((a) => a.status === 'visited').length;
+  const visited = apartments.filter((a) =>
+    ['visited', 'repeat', 'refused', 'called'].includes(a.status),
+  ).length;
   const absent = apartments.filter((a) => a.status === 'absent').length;
   return {
     total: apartments.length,
@@ -79,7 +173,11 @@ export function createEntrance(layout: EntranceLayout): Entrance {
       number: String(firstNumber + i),
       floor: firstFloor + Math.floor(i / perFloor),
       status: 'unvisited',
+      absentCount: 0,
+      repeatCount: 0,
+      markers: { ...EMPTY_MARKERS },
       note: '',
+      details: { ...EMPTY_DETAILS },
       updatedAt: null,
     })),
   };
@@ -90,7 +188,12 @@ export function updateApartment(
   territoryId: string,
   entranceId: string,
   apartmentId: string,
-  patch: Partial<Pick<Apartment, 'number' | 'floor' | 'status' | 'note'>>,
+  patch: Partial<
+    Pick<
+      Apartment,
+      'number' | 'floor' | 'status' | 'note' | 'absentCount' | 'repeatCount' | 'markers' | 'details'
+    >
+  >,
 ): AppData {
   return {
     ...data,
@@ -171,8 +274,24 @@ export function parseBackup(text: string): AppData {
           !Number.isInteger(a.floor) ||
           a.floor < -5 ||
           a.floor > 100 ||
-          !['unvisited', 'visited', 'absent'].includes(a.status) ||
+          !['unvisited', 'visited', 'absent', 'refused', 'repeat', 'called'].includes(a.status) ||
+          ![a.absentCount, a.repeatCount].every(
+            (count) => count === undefined || (Number.isSafeInteger(count) && count >= 0),
+          ) ||
+          (a.markers !== undefined &&
+            (!a.markers ||
+              typeof a.markers !== 'object' ||
+              Array.isArray(a.markers) ||
+              !MARKER_KEYS.every(
+                (key) => a.markers[key] === undefined || typeof a.markers[key] === 'boolean',
+              ))) ||
           !string(a.note, 10000) ||
+          (a.details !== undefined &&
+            (!a.details ||
+              typeof a.details !== 'object' ||
+              !['name', 'phone', 'preferredTime'].every(
+                (key) => a.details[key] === undefined || string(a.details[key], 300),
+              ))) ||
           !(
             a.updatedAt === null ||
             (string(a.updatedAt, 50) && Number.isFinite(Date.parse(a.updatedAt)))
@@ -188,7 +307,21 @@ export function parseBackup(text: string): AppData {
           number,
           floor: a.floor,
           status: a.status,
+          // Backups and phone data created before visit counters remain readable.
+          absentCount: a.absentCount ?? (a.status === 'absent' ? 1 : 0),
+          repeatCount: a.repeatCount ?? (a.status === 'repeat' ? 1 : 0),
+          markers: {
+            noIntercom: a.markers?.noIntercom ?? false,
+            noBell: a.markers?.noBell ?? false,
+            noPhone: a.markers?.noPhone ?? false,
+            pencil: a.markers?.pencil ?? false,
+          },
           note: a.note,
+          details: {
+            name: a.details?.name ?? '',
+            phone: a.details?.phone ?? '',
+            preferredTime: a.details?.preferredTime ?? '',
+          },
           updatedAt: a.updatedAt,
         };
       });
@@ -196,7 +329,70 @@ export function parseBackup(text: string): AppData {
     });
     return { id: territoryId, name: t.name.trim(), address: t.address.trim(), entrances };
   });
-  return { version: 1, territories };
+  if (
+    value.archive !== undefined &&
+    (!Array.isArray(value.archive) || value.archive.length > 10000)
+  )
+    throw new Error('В копии неверный архив.');
+  const archiveIds = new Set<string>();
+  const archive: ArchiveEntry[] = (value.archive ?? []).map((entry: any) => {
+    if (
+      !entry ||
+      !string(entry.id, 120) ||
+      !entry.id.trim() ||
+      archiveIds.has(entry.id) ||
+      !['territory', 'entrance', 'apartment', 'visits'].includes(entry.kind) ||
+      !string(entry.deletedAt, 50) ||
+      !Number.isFinite(Date.parse(entry.deletedAt)) ||
+      !entry.value
+    )
+      throw new Error('В копии неверная архивная запись.');
+    archiveIds.add(entry.id);
+    const t = entry.territory;
+    const e = entry.entrance;
+    if (
+      entry.kind !== 'territory' &&
+      (!t ||
+        !string(t.id, 120) ||
+        !t.id.trim() ||
+        !string(t.name, 120) ||
+        !t.name.trim() ||
+        !string(t.address, 300))
+    )
+      throw new Error('В архиве не указан участок.');
+    if (
+      ['apartment', 'visits'].includes(entry.kind) &&
+      (!e || !string(e.id, 120) || !e.id.trim() || !string(e.name, 120) || !e.name.trim())
+    )
+      throw new Error('В архиве не указан подъезд.');
+    const wrapped =
+      entry.kind === 'territory'
+        ? entry.value
+        : {
+            ...t,
+            entrances: [
+              entry.kind === 'entrance' ? entry.value : { ...e, apartments: [entry.value] },
+            ],
+          };
+    const parsed = parseBackup(JSON.stringify({ version: 1, territories: [wrapped] }))
+      .territories[0];
+    apartmentCount += allApartments([parsed]).length;
+    if (apartmentCount > 50000) throw new Error('В копии и архиве больше 50 000 квартир.');
+    return {
+      id: entry.id,
+      kind: entry.kind,
+      deletedAt: entry.deletedAt,
+      ...(t ? { territory: { id: t.id, name: t.name, address: t.address } } : {}),
+      ...(e ? { entrance: { id: e.id, name: e.name } } : {}),
+      value:
+        entry.kind === 'territory'
+          ? parsed
+          : entry.kind === 'entrance'
+            ? parsed.entrances[0]
+            : parsed.entrances[0].apartments[0],
+    };
+  });
+  return { version: 1, territories, archive };
 }
 
 export function createDemo(): AppData {
@@ -210,11 +406,13 @@ export function createDemo(): AppData {
   entrance.apartments = entrance.apartments.map((a, i) => ({
     ...a,
     status: i < 6 ? 'visited' : i === 6 || i === 9 ? 'absent' : 'unvisited',
+    absentCount: i === 6 || i === 9 ? 1 : 0,
     note: i === 6 ? 'Попробовать зайти вечером после 18:00.' : i === 2 ? 'Домофон работает.' : '',
     updatedAt: i < 7 || i === 9 ? new Date().toISOString() : null,
   }));
   return {
     version: 1,
+    archive: [],
     territories: [
       {
         id: id(),

@@ -12,7 +12,7 @@ on:
       - 'package-lock.json'
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ios-free-${{ github.ref }}
@@ -50,6 +50,17 @@ jobs:
           name: uchastki-ios-unsigned
           path: artifacts/uchastki-unsigned.ipa
           retention-days: 14
+      - name: Publish iPhone download
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: v1.0.1
+        run: |
+          cp artifacts/uchastki-unsigned.ipa artifacts/uchastki-1.0.1-unsigned.ipa
+          shasum -a 256 artifacts/uchastki-1.0.1-unsigned.ipa > artifacts/SHA256-IPHONE.txt
+          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Участки 1.0.1 — Android и iPhone" --notes-file docs/RELEASE-1.0.1.md
+          fi
+          gh release upload "$RELEASE_TAG" artifacts/uchastki-1.0.1-unsigned.ipa artifacts/SHA256-IPHONE.txt docs/INSTALL-IPHONE.md docs/INSTALL-ANDROID.md --clobber --repo "$GITHUB_REPOSITORY"
 
 # This IPA must be signed and installed using Sideloadly on the user's computer.
 # No paid Apple account or App Store submission is used by this workflow.

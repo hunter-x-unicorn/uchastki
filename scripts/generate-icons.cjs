@@ -12,10 +12,10 @@ function icon(size, transparent = false) {
       }
     }
   };
-  rect(0, 0, 1024, 1024, transparent ? [0, 0, 0, 0] : [40, 68, 50, 255]);
-  const ivory = [241, 246, 231, 255];
+  rect(0, 0, 1024, 1024, transparent ? [0, 0, 0, 0] : [74, 109, 167, 255]);
+  const ivory = [255, 255, 255, 255];
   for (const x of [290, 544]) for (const y of [290, 544]) rect(x, y, x + 190, y + 190, ivory);
-  rect(596, 596, 682, 682, [140, 174, 119, 255]);
+  rect(596, 596, 682, 682, [168, 196, 234, 255]);
   return PNG.sync.write(png);
 }
 fs.writeFileSync('assets/icon.png', icon(1024));
