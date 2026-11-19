@@ -1,6 +1,6 @@
 # Установка «Участков» на iPhone бесплатно
 
-Для установки без App Store нужен компьютер Windows или Mac, кабель и бесплатный Apple Account.
+Требуется iPhone с **iOS 16.4 или новее**. Для установки без App Store нужен компьютер Windows или Mac, кабель и бесплатный Apple Account.
 
 1. На компьютере откройте [страницу скачивания](https://github.com/hunter-x-unicorn/uchastki/releases/latest) и скачайте `uchastki-1.0.1-unsigned.ipa`.
 2. Установите [Sideloadly с официального сайта](https://sideloadly.io/). При работе с Windows следуйте его инструкции по необходимым компонентам Apple.

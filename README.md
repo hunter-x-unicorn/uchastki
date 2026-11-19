@@ -3,6 +3,10 @@
 Простое автономное приложение для Android и iPhone на React Native + Expo + TypeScript.
 Собственный сервер и публикация в магазинах не нужны. Никаких платных библиотек.
 
+[Скачать Android APK и iPhone IPA](https://github.com/hunter-x-unicorn/uchastki/releases/latest).
+Инструкции: [Android](docs/INSTALL-ANDROID.md), [iPhone](docs/INSTALL-IPHONE.md).
+На iPhone требуется iOS 16.4+, компьютер с Sideloadly и продление бесплатной подписи каждые 7 дней.
+
 ## Возможности
 
 - Участки с одним полем названия и меню переименования.
