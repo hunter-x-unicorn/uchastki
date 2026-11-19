@@ -1,0 +1,47 @@
+{
+  "version": "1.0.1",
+  "bytes": 30527048,
+  "sha256": "810c664506718da195230c405ed913421c23514ceae89c46ed52082cea2811a4",
+  "blobs": [
+    {
+      "sha": "019686a873b5287d03ae16c585b7eaaaba5da7af",
+      "bytes": 3145716
+    },
+    {
+      "sha": "37655f3e3794c27e24d4ed6d114b16ce9345e322",
+      "bytes": 3145716
+    },
+    {
+      "sha": "44bbebbc5054c382f40dfd9b97f9834cec3760b0",
+      "bytes": 3145716
+    },
+    {
+      "sha": "48e093390a7b1320bdc9dd33132be6b7bc6fa692",
+      "bytes": 3145716
+    },
+    {
+      "sha": "507c7d70bf69ee257bb35b62855fd542aa1b9d8c",
+      "bytes": 3145716
+    },
+    {
+      "sha": "cb05b2f958a17b4195490f7caef76f2077dd11e8",
+      "bytes": 3145716
+    },
+    {
+      "sha": "56d7d959e3889c80f7f4df96c0c802edadf81057",
+      "bytes": 3145716
+    },
+    {
+      "sha": "4a0ce2606c29f8e26fbdd27218434302d25edf8f",
+      "bytes": 3145716
+    },
+    {
+      "sha": "e81f363a168c1661046c29186d9c88f43ed3325d",
+      "bytes": 3145716
+    },
+    {
+      "sha": "4293f95af06ed52e4c9fde70d16a8d6ec24791c9",
+      "bytes": 2215604
+    }
+  ]
+}

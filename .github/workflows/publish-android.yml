@@ -1,0 +1,56 @@
+name: Publish signed Android download
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-android.yml'
+      - '.github/releases/android-1.0.1.json'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-android-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Retrieve and verify signed APK
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json, os, pathlib, subprocess
+          manifest = json.loads(pathlib.Path('.github/releases/android-1.0.1.json').read_text())
+          root = pathlib.Path('artifacts')
+          root.mkdir(exist_ok=True)
+          apk = root / 'uchastki-1.0.1.apk'
+          with apk.open('wb') as output:
+              for part in manifest['blobs']:
+                  response = subprocess.check_output(['gh', 'api', f"repos/{os.environ['GITHUB_REPOSITORY']}/git/blobs/{part['sha']}"])
+                  payload = json.loads(response)
+                  assert payload['encoding'] == 'base64'
+                  data = base64.b64decode(payload['content'], validate=False)
+                  assert len(data) == part['bytes']
+                  output.write(data)
+          assert apk.stat().st_size == manifest['bytes']
+          digest = hashlib.sha256(apk.read_bytes()).hexdigest()
+          assert digest == manifest['sha256'], 'APK checksum mismatch'
+          (root / 'SHA256-ANDROID.txt').write_text(f'{digest}  {apk.name}\n')
+          print(f'Verified signed APK: {apk.stat().st_size} bytes, SHA256 {digest}')
+          PY
+      - name: Publish Android download
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: v1.0.1
+        run: |
+          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Участки 1.0.1 — Android и iPhone" --notes-file docs/RELEASE-1.0.1.md
+          fi
+          gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" artifacts/uchastki-1.0.1.apk artifacts/SHA256-ANDROID.txt docs/INSTALL-ANDROID.md --clobber
