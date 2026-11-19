@@ -86,12 +86,16 @@ test('four normal slots, fifth shrinks, six maximum, overflow below, fewer than 
   );
   await page.goto('/?territory=territory&entrance=' + entrance.id);
   const normal = await apartment(page, '1').boundingBox();
+  expect(normal!.width).toBeGreaterThan(60);
+  expect(normal!.height).toBeCloseTo(normal!.width, 0);
   await action(page, '1', 'Разделить');
   const five = await apartment(page, '1').boundingBox();
   expect(five!.width).toBeLessThan(normal!.width);
   expect((await apartment(page, '1/2').boundingBox())!.y).toBeCloseTo(five!.y, 0);
   await action(page, '1', 'Разделить');
   const six = await apartment(page, '1').boundingBox();
+  expect(six!.width).toBeGreaterThan(40);
+  expect(six!.height).toBeCloseTo(six!.width, 0);
   expect(six!.width).toBeLessThan(five!.width);
   await action(page, '1', 'Разделить');
   const bottom = await apartment(page, '4').boundingBox();
@@ -119,6 +123,14 @@ test('four normal slots, fifth shrinks, six maximum, overflow below, fewer than 
     .poll(async () => (await apartment(other, '1').boundingBox())!.width)
     .toBeCloseTo(normal!.width, 0);
   expect(await other.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+  await other.setViewportSize({ width: 390, height: 844 });
+  await expect
+    .poll(async () => (await apartment(other, '1').boundingBox())!.width)
+    .toBeGreaterThan(normal!.width);
+  await other.setViewportSize({ width: 320, height: 720 });
+  await expect
+    .poll(async () => (await apartment(other, '1').boundingBox())!.width)
+    .toBeCloseTo(normal!.width, 0);
   await other.close();
 });
 test('deletions require confirmation, clear preserves notes, archive restores records', async ({
