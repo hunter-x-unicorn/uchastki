@@ -40,7 +40,7 @@ export function ApartmentGrid({
 
   return (
     <View style={g.grid} onLayout={(event) => setWidth(event.nativeEvent.layout.width)}>
-      {(width > 0 ? rows : []).map(({ floor, lines, columns }) => (
+      {rows.map(({ floor, lines, columns }) => (
         <View key={floor} style={g.floor}>
           {lines.map((items, lineIndex) => (
             <View
@@ -63,7 +63,12 @@ export function ApartmentGrid({
                     onPress={() => onOpen(apartment)}
                     style={({ pressed }) => [
                       g.block,
-                      { width: (width - GAP * (columns - 1)) / columns },
+                      width > 0 && {
+                        flexGrow: 0,
+                        flexShrink: 0,
+                        flexBasis: 'auto',
+                        width: (width - GAP * (columns - 1)) / columns,
+                      },
                       {
                         backgroundColor: appearance.background,
                         borderColor:
@@ -134,7 +139,15 @@ export function ApartmentGrid({
                 (_, index) => (
                   <View
                     key={`empty-${index}`}
-                    style={[g.empty, { width: (width - GAP * (columns - 1)) / columns }]}
+                    style={[
+                      g.empty,
+                      width > 0 && {
+                        flexGrow: 0,
+                        flexShrink: 0,
+                        flexBasis: 'auto',
+                        width: (width - GAP * (columns - 1)) / columns,
+                      },
+                    ]}
                   />
                 ),
               )}
@@ -147,14 +160,11 @@ export function ApartmentGrid({
 }
 
 const g = StyleSheet.create({
-  grid: { width: '100%', gap: 12, marginBottom: 16 },
+  grid: { gap: 12, marginBottom: 16 },
   floor: { gap: GAP },
   row: { flexDirection: 'row', gap: GAP },
   block: {
-    // Yoga treats positive `flex` as a zero basis, even with flexBasis: 'auto'.
-    // Fixed-width cells must not use the flex shorthand (React Native differs from web).
-    flexGrow: 0,
-    flexShrink: 0,
+    flex: 1,
     minWidth: 0,
     aspectRatio: 1,
     borderWidth: 1,
@@ -163,7 +173,7 @@ const g = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 3,
   },
-  empty: { flexGrow: 0, flexShrink: 0, minWidth: 0, aspectRatio: 1 },
+  empty: { flex: 1, minWidth: 0, aspectRatio: 1 },
   number: { color: C.ink, fontSize: 18, fontWeight: '600', maxWidth: '100%' },
   numberWithDots: { marginTop: 12 },
   numberWithMarkers: { fontSize: 16, lineHeight: 18, marginTop: 0 },
